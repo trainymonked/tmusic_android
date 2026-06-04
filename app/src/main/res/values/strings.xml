@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">T-Music</string>
+    <string name="playback_attribution_label">Music playback</string>
+</resources>

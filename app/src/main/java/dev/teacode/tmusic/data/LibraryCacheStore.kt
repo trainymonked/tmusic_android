@@ -1,0 +1,256 @@
+package dev.teacode.tmusic.data
+
+import android.content.Context
+import dev.teacode.tmusic.domain.DownloadState
+import dev.teacode.tmusic.domain.LibraryAlbum
+import dev.teacode.tmusic.domain.Playlist
+import dev.teacode.tmusic.domain.Track
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class CachedLibrary(
+    val playlists: List<Playlist>,
+    val tracks: List<Track>,
+    val savedAlbums: List<LibraryAlbum> = emptyList(),
+) {
+    val isEmpty: Boolean = playlists.isEmpty() && tracks.isEmpty() && savedAlbums.isEmpty()
+}
+
+class LibraryCacheStore(context: Context) {
+    private val preferences = context.applicationContext.getSharedPreferences(
+        LIBRARY_CACHE_NAME,
+        Context.MODE_PRIVATE,
+    )
+
+    fun library(): CachedLibrary {
+        return CachedLibrary(
+            playlists = readPlaylists(),
+            tracks = readTracks(),
+            savedAlbums = readSavedAlbums(),
+        )
+    }
+
+    fun saveLibrary(
+        playlists: List<Playlist>,
+        tracks: List<Track>,
+        savedAlbums: List<LibraryAlbum> = readSavedAlbums(),
+    ) {
+        preferences.edit()
+            .putString(KEY_PLAYLISTS, playlists.toJsonArray { it.toJson() }.toString())
+            .putString(KEY_TRACKS, tracks.toJsonArray { it.toJson() }.toString())
+            .putString(KEY_SAVED_ALBUMS, savedAlbums.toJsonArray { it.toJson() }.toString())
+            .apply()
+    }
+
+    fun clear() {
+        preferences.edit().clear().apply()
+    }
+
+    fun sizeBytes(): Long {
+        return preferences.getString(KEY_PLAYLISTS, null).orEmpty().toByteArray().size.toLong() +
+            preferences.getString(KEY_TRACKS, null).orEmpty().toByteArray().size.toLong()
+    }
+
+    private fun readPlaylists(): List<Playlist> {
+        return preferences.getString(KEY_PLAYLISTS, null)
+            ?.let { json -> runCatching { JSONArray(json).mapPlaylists() }.getOrNull() }
+            .orEmpty()
+    }
+
+    private fun readTracks(): List<Track> {
+        return preferences.getString(KEY_TRACKS, null)
+            ?.let { json -> runCatching { JSONArray(json).mapTracks() }.getOrNull() }
+            .orEmpty()
+    }
+
+    private fun readSavedAlbums(): List<LibraryAlbum> {
+        return preferences.getString(KEY_SAVED_ALBUMS, null)
+            ?.let { json -> runCatching { JSONArray(json).mapAlbums() }.getOrNull() }
+            .orEmpty()
+    }
+
+    private companion object {
+        const val LIBRARY_CACHE_NAME = "tmusic_library_cache"
+        const val KEY_PLAYLISTS = "playlists"
+        const val KEY_TRACKS = "tracks"
+        const val KEY_SAVED_ALBUMS = "saved_albums"
+    }
+}
+
+private fun LibraryAlbum.toJson(): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("title", title)
+        .put("artist", artist)
+        .put("artistId", artistId)
+        .put("artistIds", JSONArray(artistIds))
+        .put("releaseYear", releaseYear)
+        .put("genre", genre)
+        .put("trackCount", trackCount)
+        .put("accentColor", accentColor)
+        .put("artworkTrackId", artworkTrackId)
+        .put("savedByCurrentUser", savedByCurrentUser)
+        .put("isOfflineEnabled", isOfflineEnabled)
+        .put("hasArtwork", hasArtwork)
+}
+
+private fun JSONObject.toAlbum(): LibraryAlbum {
+    return LibraryAlbum(
+        id = optString("id"),
+        title = optString("title"),
+        artist = optString("artist"),
+        artistId = optString("artistId").takeIf { it.isNotBlank() },
+        artistIds = optJSONArray("artistIds").stringValues(),
+        releaseYear = optInt("releaseYear", -1).takeIf { it > 0 },
+        genre = optString("genre").takeIf { it.isNotBlank() },
+        trackCount = optInt("trackCount", 0).coerceAtLeast(0),
+        accentColor = optLong("accentColor", 0xFF444444),
+        artworkTrackId = optString("artworkTrackId").takeIf { it.isNotBlank() },
+        savedByCurrentUser = optBoolean("savedByCurrentUser", false),
+        isOfflineEnabled = optBoolean("isOfflineEnabled", false),
+        hasArtwork = optBoolean("hasArtwork", false),
+    )
+}
+
+private fun Playlist.toJson(): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("title", title)
+        .put("description", description)
+        .put("trackIds", JSONArray(trackIds))
+        .put("playlistTrackIds", JSONArray(playlistTrackIds))
+        .put("playlistTrackIdsByTrackId", JSONObject(playlistTrackIdsByTrackId))
+        .put("isOfflineEnabled", isOfflineEnabled)
+        .put("isPublic", isPublic)
+        .put("isFavorites", isFavorites)
+        .put("trackCount", trackCount)
+}
+
+private fun JSONObject.toPlaylist(): Playlist {
+    val trackIds = optJSONArray("trackIds").stringValues()
+    return Playlist(
+        id = optString("id"),
+        title = optString("title"),
+        description = optString("description"),
+        trackIds = trackIds,
+        isOfflineEnabled = optBoolean("isOfflineEnabled", false),
+        isPublic = optBoolean("isPublic", false),
+        playlistTrackIds = optJSONArray("playlistTrackIds").stringValues(),
+        playlistTrackIdsByTrackId = optJSONObject("playlistTrackIdsByTrackId").stringMap(),
+        isFavorites = optBoolean("isFavorites", false),
+        trackCount = optInt("trackCount", trackIds.size).coerceAtLeast(trackIds.size),
+    )
+}
+
+private fun Track.toJson(): JSONObject {
+    return JSONObject()
+        .put("id", id)
+        .put("title", title)
+        .put("artist", artist)
+        .put("album", album)
+        .put("durationSeconds", durationSeconds)
+        .put("serverPath", serverPath)
+        .put("accentColor", accentColor)
+        .put("downloadState", downloadState.name)
+        .put("playCount", playCount)
+        .put("artistId", artistId)
+        .put("artistIds", JSONArray(artistIds))
+        .put("albumId", albumId)
+        .put("albumArtist", albumArtist)
+        .put("albumArtistId", albumArtistId)
+        .put("trackNumber", trackNumber)
+        .put("discNumber", discNumber)
+        .put("releaseYear", releaseYear)
+        .put("genre", genre)
+        .put("isLiked", isLiked)
+}
+
+private fun JSONObject.toTrack(): Track {
+    return Track(
+        id = optString("id"),
+        title = optString("title"),
+        artist = optString("artist"),
+        album = optString("album"),
+        durationSeconds = optInt("durationSeconds", 0),
+        serverPath = optString("serverPath"),
+        accentColor = optLong("accentColor", 0xFF444444),
+        downloadState = optString("downloadState").toDownloadState(),
+        playCount = optInt("playCount", 0),
+        artistId = optString("artistId").takeIf { it.isNotBlank() },
+        artistIds = optJSONArray("artistIds").stringValues(),
+        albumId = optString("albumId").takeIf { it.isNotBlank() },
+        albumArtist = optString("albumArtist").takeIf { it.isNotBlank() },
+        albumArtistId = optString("albumArtistId").takeIf { it.isNotBlank() },
+        trackNumber = if (has("trackNumber") && !isNull("trackNumber")) optInt("trackNumber") else null,
+        discNumber = if (has("discNumber") && !isNull("discNumber")) optInt("discNumber") else null,
+        releaseYear = if (has("releaseYear") && !isNull("releaseYear")) optInt("releaseYear") else null,
+        genre = optString("genre").takeIf { it.isNotBlank() },
+        isLiked = if (has("isLiked") && !isNull("isLiked")) optBoolean("isLiked") else null,
+    )
+}
+
+private fun String.toDownloadState(): DownloadState {
+    return runCatching { DownloadState.valueOf(this) }.getOrDefault(DownloadState.NotDownloaded)
+}
+
+private fun <T> List<T>.toJsonArray(transform: (T) -> JSONObject): JSONArray {
+    val array = JSONArray()
+    forEach { array.put(transform(it)) }
+    return array
+}
+
+private fun JSONArray.mapPlaylists(): List<Playlist> {
+    val values = mutableListOf<Playlist>()
+    for (index in 0 until length()) {
+        optJSONObject(index)?.let { values += it.toPlaylist() }
+    }
+    return values
+}
+
+private fun JSONArray.mapTracks(): List<Track> {
+    val values = mutableListOf<Track>()
+    for (index in 0 until length()) {
+        optJSONObject(index)?.let { values += it.toTrack() }
+    }
+    return values
+}
+
+private fun JSONArray.mapAlbums(): List<LibraryAlbum> {
+    val values = mutableListOf<LibraryAlbum>()
+    for (index in 0 until length()) {
+        optJSONObject(index)?.let { values += it.toAlbum() }
+    }
+    return values
+}
+
+private fun JSONArray?.stringValues(): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+
+    val values = mutableListOf<String>()
+    for (index in 0 until length()) {
+        val value = optString(index)
+        if (value.isNotBlank()) {
+            values += value
+        }
+    }
+    return values
+}
+
+private fun JSONObject?.stringMap(): Map<String, String> {
+    if (this == null) {
+        return emptyMap()
+    }
+
+    val values = linkedMapOf<String, String>()
+    val keys = keys()
+    while (keys.hasNext()) {
+        val key = keys.next()
+        val value = optString(key)
+        if (key.isNotBlank() && value.isNotBlank()) {
+            values[key] = value
+        }
+    }
+    return values
+}
