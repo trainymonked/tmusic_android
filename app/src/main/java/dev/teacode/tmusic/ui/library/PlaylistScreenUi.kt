@@ -29,7 +29,7 @@ fun PlaylistScreen(
     onToggleTrackFavorite: ((Track) -> Unit)?,
     onRemoveTrack: (String) -> Unit,
     onReorderTracks: (List<String>) -> Unit,
-    onUpdatePlaylist: (String, String) -> Unit,
+    onUpdatePlaylist: (String) -> Unit,
     onDeletePlaylist: () -> Unit,
     onPlayPlaylist: () -> Unit,
     onShufflePlayPlaylist: () -> Unit,
@@ -38,12 +38,14 @@ fun PlaylistScreen(
     isPlaybackPlaying: Boolean,
     canPlayFromNetwork: Boolean,
     offlinePlayableTrackIds: Set<String>,
+    downloadedTrackIds: Set<String>,
     onTogglePlayback: () -> Unit,
     artworkBitmaps: Map<String, ImageBitmap>,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     isLoadingMore: Boolean,
     canLoadMore: Boolean,
     onLoadMore: () -> Unit,
+    offlineNotice: String?,
 ) {
     var showEditPlaylistDialog by remember { mutableStateOf(false) }
     var showDeletePlaylistDialog by remember { mutableStateOf(false) }
@@ -73,12 +75,14 @@ fun PlaylistScreen(
         isPlaybackPlaying = isPlaybackPlaying,
         canPlayFromNetwork = canPlayFromNetwork,
         offlinePlayableTrackIds = offlinePlayableTrackIds,
+        downloadedTrackIds = downloadedTrackIds,
         onTogglePlayback = onTogglePlayback,
         artworkBitmaps = artworkBitmaps,
         onRequestArtwork = onRequestArtwork,
         isLoadingMore = isLoadingMore,
         canLoadMore = canLoadMore,
         onLoadMore = onLoadMore,
+        offlineNotice = offlineNotice,
     )
 
     if (showDeletePlaylistDialog && !playlist.isFavoritesPlaylist()) {
@@ -107,8 +111,8 @@ fun PlaylistScreen(
         EditPlaylistDialog(
             playlist = playlist,
             onDismiss = { showEditPlaylistDialog = false },
-            onSave = { name, description ->
-                onUpdatePlaylist(name, description)
+            onSave = { name ->
+                onUpdatePlaylist(name)
                 showEditPlaylistDialog = false
             },
         )

@@ -22,7 +22,7 @@ import dev.teacode.tmusic.domain.Playlist
 fun EditPlaylistDialog(
     playlist: Playlist,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
+    onSave: (String) -> Unit,
 ) {
     var name by remember(playlist.id) { mutableStateOf(playlist.title) }
     AlertDialog(
@@ -48,7 +48,7 @@ fun EditPlaylistDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(name, "") },
+                onClick = { onSave(name) },
                 enabled = name.isNotBlank(),
                 shape = RoundedCornerShape(8.dp),
             ) {

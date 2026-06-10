@@ -92,6 +92,7 @@ private fun LibraryAlbum.toJson(): JSONObject {
         .put("savedByCurrentUser", savedByCurrentUser)
         .put("isOfflineEnabled", isOfflineEnabled)
         .put("hasArtwork", hasArtwork)
+        .put("totalDurationSeconds", totalDurationSeconds)
 }
 
 private fun JSONObject.toAlbum(): LibraryAlbum {
@@ -109,6 +110,11 @@ private fun JSONObject.toAlbum(): LibraryAlbum {
         savedByCurrentUser = optBoolean("savedByCurrentUser", false),
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
         hasArtwork = optBoolean("hasArtwork", false),
+        totalDurationSeconds = if (has("totalDurationSeconds") && !isNull("totalDurationSeconds")) {
+            optInt("totalDurationSeconds").coerceAtLeast(0)
+        } else {
+            null
+        },
     )
 }
 
@@ -116,7 +122,6 @@ private fun Playlist.toJson(): JSONObject {
     return JSONObject()
         .put("id", id)
         .put("title", title)
-        .put("description", description)
         .put("trackIds", JSONArray(trackIds))
         .put("playlistTrackIds", JSONArray(playlistTrackIds))
         .put("playlistTrackIdsByTrackId", JSONObject(playlistTrackIdsByTrackId))
@@ -124,6 +129,7 @@ private fun Playlist.toJson(): JSONObject {
         .put("isPublic", isPublic)
         .put("isFavorites", isFavorites)
         .put("trackCount", trackCount)
+        .put("totalDurationSeconds", totalDurationSeconds)
 }
 
 private fun JSONObject.toPlaylist(): Playlist {
@@ -131,7 +137,6 @@ private fun JSONObject.toPlaylist(): Playlist {
     return Playlist(
         id = optString("id"),
         title = optString("title"),
-        description = optString("description"),
         trackIds = trackIds,
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
         isPublic = optBoolean("isPublic", false),
@@ -139,6 +144,11 @@ private fun JSONObject.toPlaylist(): Playlist {
         playlistTrackIdsByTrackId = optJSONObject("playlistTrackIdsByTrackId").stringMap(),
         isFavorites = optBoolean("isFavorites", false),
         trackCount = optInt("trackCount", trackIds.size).coerceAtLeast(trackIds.size),
+        totalDurationSeconds = if (has("totalDurationSeconds") && !isNull("totalDurationSeconds")) {
+            optInt("totalDurationSeconds").coerceAtLeast(0)
+        } else {
+            null
+        },
     )
 }
 

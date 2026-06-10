@@ -6,6 +6,26 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.runtime.Composable
 import androidx.compose.material3.MaterialTheme
+import dev.teacode.tmusic.data.AppUpdateInfo
+
+@Composable
+internal fun ProfileUpdateSection(
+    update: AppUpdateInfo,
+    updateStatus: String?,
+    actionLabel: String,
+    actionEnabled: Boolean,
+    onOpenUpdate: () -> Unit,
+) {
+    ProfileSettingsSection(title = "App update") {
+        ProfileActionRow(
+            title = "Update available",
+            subtitle = updateStatus ?: update.subtitle(),
+            actionLabel = actionLabel,
+            onAction = onOpenUpdate,
+            enabled = actionEnabled,
+        )
+    }
+}
 
 @Composable
 internal fun ProfilePlaybackSection(
@@ -124,6 +144,37 @@ internal fun ProfileConnectionSection(
             },
         )
     }
+}
+
+@Composable
+internal fun ProfileAppInfoSection(
+    versionName: String,
+    updateCheckInProgress: Boolean,
+    onCheckUpdates: () -> Unit,
+) {
+    ProfileSettingsSection(title = "App") {
+        ProfileInfoRow(
+            title = "Version",
+            value = versionName,
+            valueTextAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+        ProfileSettingDivider()
+        ProfileActionRow(
+            title = "Check updates",
+            subtitle = "",
+            actionLabel = if (updateCheckInProgress) "Checking" else "Check",
+            onAction = onCheckUpdates,
+            enabled = !updateCheckInProgress,
+        )
+    }
+}
+
+private fun AppUpdateInfo.subtitle(): String {
+    val firstChangeLine = changelog
+        .lineSequence()
+        .map { it.trim().trimStart('-', '*').trim() }
+        .firstOrNull { it.isNotBlank() }
+    return firstChangeLine?.take(120) ?: "New version is ready to install"
 }
 
 private fun SyncMode.profileLabel(canUseNetwork: Boolean): String {

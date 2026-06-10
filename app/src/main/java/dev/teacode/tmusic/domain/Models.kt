@@ -46,7 +46,6 @@ data class Track(
 data class Playlist(
     val id: String,
     val title: String,
-    val description: String,
     val trackIds: List<String>,
     val isOfflineEnabled: Boolean,
     val isPublic: Boolean = false,
@@ -54,6 +53,7 @@ data class Playlist(
     val playlistTrackIdsByTrackId: Map<String, String> = emptyMap(),
     val isFavorites: Boolean = false,
     val trackCount: Int = trackIds.size,
+    val totalDurationSeconds: Int? = null,
 )
 
 data class PlayerState(
@@ -116,6 +116,7 @@ data class LibraryAlbum(
     val savedByCurrentUser: Boolean = false,
     val isOfflineEnabled: Boolean = false,
     val hasArtwork: Boolean = false,
+    val totalDurationSeconds: Int? = null,
 )
 
 data class LibrarySearchResults(

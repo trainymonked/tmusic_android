@@ -9,6 +9,7 @@ import dev.teacode.tmusic.domain.ScrobbleState
 internal fun ProfileLastFmSection(
     connection: LastFmConnection,
     pendingPlayEventCount: Int,
+    syncProgress: Pair<Int, Int>?,
     scrobblingPaused: Boolean,
     waitingForSession: Boolean,
     canUseNetwork: Boolean,
@@ -41,14 +42,16 @@ internal fun ProfileLastFmSection(
             ProfileSettingDivider()
             ProfileActionRow(
                 title = "Pending scrobbles",
-                subtitle = if (pendingPlayEventCount > 0) {
+                subtitle = if (syncProgress != null) {
+                    "Syncing ${syncProgress.first} of ${syncProgress.second}"
+                } else if (pendingPlayEventCount > 0) {
                     "$pendingPlayEventCount plays are waiting to sync"
                 } else {
                     "Everything is synced"
                 },
                 actionLabel = "Sync",
                 onAction = onSyncUpdates,
-                enabled = canUseNetwork && pendingPlayEventCount > 0,
+                enabled = canUseNetwork && pendingPlayEventCount > 0 && syncProgress == null,
             )
             ProfileSettingDivider()
             ProfileActionRow(

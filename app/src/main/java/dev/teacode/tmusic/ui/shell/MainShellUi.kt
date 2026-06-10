@@ -85,6 +85,7 @@ internal fun MainShell(
     activePlaylistId: String?,
     activeAlbumId: String?,
     queueTracks: List<Track>,
+    manualQueueFlags: List<Boolean>,
     queueCurrentIndex: Int,
     playbackQueueGeneration: Long,
     artworkTransitionDirection: Int,
@@ -99,6 +100,7 @@ internal fun MainShell(
     syncMode: SyncMode,
     lastFmConnection: LastFmConnection,
     pendingPlayEventCount: Int,
+    pendingPlayEventSyncProgress: Pair<Int, Int>?,
     waitingForLastFmSession: Boolean,
     scrobblingPaused: Boolean,
     showLyricsSetting: Boolean,
@@ -108,6 +110,8 @@ internal fun MainShell(
     downloadUsingCellular: Boolean,
     downloadedSizeBytes: Long,
     cacheSizeBytes: Long,
+    appUpdateController: AppUpdateController,
+    appVersionName: String,
     onRetry: () -> Unit,
     onRefreshHome: () -> Unit,
     onRefreshLibrary: () -> Unit,
@@ -126,7 +130,7 @@ internal fun MainShell(
     onDownloadUsingCellularChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
     onCreatePlaylist: (String) -> Unit,
-    onUpdatePlaylist: (Playlist, String, String) -> Unit,
+    onUpdatePlaylist: (Playlist, String) -> Unit,
     onDeletePlaylist: (Playlist) -> Unit,
     onAddTrackToPlaylistClick: (Track) -> Unit,
     onDownloadPlaylist: (Playlist) -> Unit,
@@ -142,6 +146,7 @@ internal fun MainShell(
     onSyncLastFmUpdates: () -> Unit,
     onClearDownloads: () -> Unit,
     onClearCache: () -> Unit,
+    onCheckUpdates: () -> Unit,
     onSelectTab: (AppTab) -> Unit,
     onSelectPlaylist: (Playlist) -> Unit,
     onShowAllArtists: () -> Unit,
@@ -199,12 +204,12 @@ internal fun MainShell(
         .filter { track -> track.downloadState == DownloadState.Downloaded || track.id in offlinePlayableTrackIds }
         .map { it.id }
         .toSet()
-    val offlineAvailableTrackIds = locallyPlayableTrackIds +
-        cleanPlaylists
-            .filter { it.isOfflineEnabled }
-            .flatMap { it.trackIds }
-            .toSet()
+    val offlineAvailableTrackIds = locallyPlayableTrackIds
     val downloadedTrackCount = tracks.count { it.downloadState == DownloadState.Downloaded }
+    val downloadedTrackIds = tracks
+        .filter { it.downloadState == DownloadState.Downloaded }
+        .map { it.id }
+        .toSet()
     val visibleTracks = when {
         onlineMode -> tracks
         offlineOnly -> tracks.filter { it.id in offlineAvailableTrackIds }
@@ -222,15 +227,19 @@ internal fun MainShell(
     val allVisibleArtists = if (onlineMode) {
         artists.sortedArtistsForDisplay()
     } else {
-        visibleTracks.downloadedArtists()
+        artists.sortedArtistsForDisplay().ifEmpty { tracks.downloadedArtists() }
     }
     val visibleArtists = if (onlineMode) {
         allVisibleArtists.filterOwnReleaseArtists()
     } else {
         allVisibleArtists
     }
-    val offlineLibraryAlbums = (albums + downloadedAlbums)
-        .filter { album -> album.isOfflineEnabled || album.id in offlineAlbumIds }
+    val offlineLibraryAlbums = (albums + savedAlbums + downloadedAlbums)
+        .filter { album ->
+            album.savedByCurrentUser ||
+                album.isOfflineEnabled ||
+                album.id in offlineAlbumIds
+        }
         .distinctBy { it.id }
         .sortedAlbumsForDisplay()
     val savedAlbumIdsForUi = savedAlbums
@@ -253,11 +262,18 @@ internal fun MainShell(
     val visibleAlbumTracksById = downloadedAlbumTracksById + cachedAlbumTracksById + albumTracksById
     val visibleSavedAlbums = when {
         onlineMode -> savedAlbums.sortedAlbumsForDisplay()
-        else -> (savedAlbums.map { album ->
+        else -> (savedAlbums.filter { album ->
+            album.savedByCurrentUser || album.isOfflineEnabled || album.id in offlineAlbumIds
+        }.map { album ->
             album.copy(isOfflineEnabled = album.isOfflineEnabled || album.id in offlineAlbumIds)
         } + offlineLibraryAlbums)
             .distinctBy { it.id }
             .sortedAlbumsForDisplay()
+    }
+    val homeRecentTracks = if (onlineMode || recentTracks.isNotEmpty()) {
+        recentTracks
+    } else {
+        tracks.take(50)
     }
     val selectedHomeArtist = if (destination.tab == AppTab.Home && destination.homeRoute == HomeRoute.Artist) {
         destination.artistId?.let { artistId ->
@@ -279,7 +295,12 @@ internal fun MainShell(
                 ?: visibleSavedAlbums.firstOrNull { it.id == albumId }
                 ?: albumsByArtist.values.flatten().firstOrNull { it.id == albumId }
                 ?: appearsOnByArtist.values.flatten().firstOrNull { it.id == albumId }
+                ?: albums.firstOrNull { it.id == albumId }
+                ?: savedAlbums.firstOrNull { it.id == albumId }
                 ?: searchResults.albums.firstOrNull { it.id == albumId }
+                ?: (tracks + albumTracksById.values.flatten())
+                    .firstOrNull { it.albumId == albumId }
+                    ?.navigationAlbum()
         }?.let { album ->
             album.copy(
                 savedByCurrentUser = album.savedByCurrentUser || album.id in savedAlbumIdsForUi,
@@ -411,7 +432,7 @@ internal fun MainShell(
                     when (destination.homeRoute) {
                         HomeRoute.Overview -> HomeScreen(
                             artists = visibleArtists,
-                            recentTracks = recentTracks,
+                            recentTracks = homeRecentTracks,
                             databaseTrackCount = databaseTrackCount,
                             offlineTrackCount = locallyPlayableTrackIds.size,
                             artworkBitmaps = artworkBitmaps,
@@ -419,16 +440,17 @@ internal fun MainShell(
                             onlineMode = onlineMode,
                             syncMode = syncMode,
                             isLoading = isLoading,
+                            playableTrackIds = offlineAvailableTrackIds,
                             onRefresh = onRefreshHome,
                             onRequestArtwork = onRequestArtwork,
                             onShowAllArtists = onShowAllArtists,
                             onSelectArtist = onSelectArtist,
-                            onAddTrackToPlaylist = if (onlineMode) onAddTrackToPlaylistClick else null,
+                            onAddTrackToPlaylist = onAddTrackToPlaylistClick,
                             onAddTrackToQueue = onAddTrackToQueue,
                             onGoToTrackArtist = onGoToTrackArtist,
                             onGoToTrackAlbum = onGoToTrackAlbum,
                             favoriteTrackIds = favoriteTrackIds,
-                            onToggleTrackFavorite = if (onlineMode) onToggleTrackFavorite else null,
+                            onToggleTrackFavorite = onToggleTrackFavorite,
                             onSelectTrack = onSelectTrack,
                         )
                         HomeRoute.Artists -> ArtistsScreen(
@@ -438,6 +460,7 @@ internal fun MainShell(
                             isRefreshing = isLoading,
                             isLoadingMore = artistListLoadingMore,
                             canLoadMore = onlineMode && artistListHasMore,
+                            offlineNotice = if (!onlineMode) "Offline. Showing cached artists." else null,
                             onRefresh = onRefreshHome,
                             onLoadMore = onLoadMoreArtists,
                             onRequestArtwork = onRequestArtwork,
@@ -476,12 +499,13 @@ internal fun MainShell(
                             onRequestArtwork = onRequestArtwork,
                             onSelectAlbum = onSelectAlbum,
                             onSelectArtist = onSelectArtist,
-                            onAddTrackToPlaylist = if (onlineMode) onAddTrackToPlaylistClick else null,
+                            offlineNotice = if (!onlineMode) "Offline. Showing cached artist data." else null,
+                            onAddTrackToPlaylist = onAddTrackToPlaylistClick,
                             onAddTrackToQueue = onAddTrackToQueue,
                             onGoToTrackArtist = onGoToTrackArtist,
                             onGoToTrackAlbum = onGoToTrackAlbum,
                             favoriteTrackIds = favoriteTrackIds,
-                            onToggleTrackFavorite = if (onlineMode) onToggleTrackFavorite else null,
+                            onToggleTrackFavorite = onToggleTrackFavorite,
                             onSelectTrack = { track ->
                                 onSelectTrack(track)
                             },
@@ -511,6 +535,11 @@ internal fun MainShell(
                             onLoadMore = {
                                 selectedAlbum?.let(onLoadMoreAlbumTracks)
                             },
+                            offlineNotice = if (!onlineMode && selectedAlbum?.isOfflineEnabled != true) {
+                                "Offline. Showing cached album data."
+                            } else {
+                                null
+                            },
                             onTogglePlayback = onTogglePlayback,
                             onPlayAlbum = {
                                 selectedAlbum?.let { album ->
@@ -535,12 +564,12 @@ internal fun MainShell(
                                     onPlayAlbumTrack(album, visibleAlbumTracksById[album.id].orEmpty(), track)
                                 }
                             },
-                            onAddTrackToPlaylist = if (onlineMode) onAddTrackToPlaylistClick else null,
+                            onAddTrackToPlaylist = onAddTrackToPlaylistClick,
                             onAddTrackToQueue = onAddTrackToQueue,
                             onGoToTrackArtist = onGoToTrackArtist,
                             onGoToTrackAlbum = onGoToTrackAlbum,
                             favoriteTrackIds = favoriteTrackIds,
-                            onToggleTrackFavorite = if (onlineMode) onToggleTrackFavorite else null,
+                            onToggleTrackFavorite = onToggleTrackFavorite,
                         )
                     }
                 }
@@ -589,18 +618,18 @@ internal fun MainShell(
                                 }
                             },
                             onDownloadPlaylist = onDownloadPlaylist,
-                            onAddTrackToPlaylist = if (onlineMode) onAddTrackToPlaylistClick else null,
+                            onAddTrackToPlaylist = onAddTrackToPlaylistClick,
                             onAddTrackToQueue = onAddTrackToQueue,
                             onGoToTrackArtist = onGoToTrackArtist,
                             onGoToTrackAlbum = onGoToTrackAlbum,
                             favoriteTrackIds = favoriteTrackIds,
-                            onToggleTrackFavorite = if (onlineMode) onToggleTrackFavorite else null,
+                            onToggleTrackFavorite = onToggleTrackFavorite,
                             onRemoveTrack = { playlistTrackId -> onRemoveTrackFromPlaylist(selectedPlaylist, playlistTrackId) },
                             onReorderTracks = { playlistTrackIds ->
                                 onReorderPlaylistTracks(selectedPlaylist, playlistTrackIds)
                             },
-                            onUpdatePlaylist = { name, description ->
-                                onUpdatePlaylist(selectedPlaylist, name, description)
+                            onUpdatePlaylist = { name ->
+                                onUpdatePlaylist(selectedPlaylist, name)
                             },
                             onDeletePlaylist = { onDeletePlaylist(selectedPlaylist) },
                             onPlayPlaylist = { onPlayPlaylist(selectedPlaylist, playlistPlaybackTracks) },
@@ -610,6 +639,7 @@ internal fun MainShell(
                             isPlaybackPlaying = playerState.isPlaying,
                             canPlayFromNetwork = canPlayRemoteTracks,
                             offlinePlayableTrackIds = offlineAvailableTrackIds,
+                            downloadedTrackIds = downloadedTrackIds,
                             onTogglePlayback = onTogglePlayback,
                             artworkBitmaps = artworkBitmaps,
                             onRequestArtwork = onRequestArtwork,
@@ -618,6 +648,11 @@ internal fun MainShell(
                                 playlistTrackHasMoreById[selectedPlaylist.id] != false &&
                                 selectedPlaylist.trackIds.size < selectedPlaylist.trackCount,
                             onLoadMore = { onLoadMorePlaylistTracks(selectedPlaylist) },
+                            offlineNotice = if (!onlineMode && !displayPlaylist.isOfflineEnabled) {
+                                "Offline. Showing cached playlist data."
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -646,7 +681,7 @@ internal fun MainShell(
                     onGoToTrackArtist = onGoToTrackArtist,
                     onGoToTrackAlbum = onGoToTrackAlbum,
                     favoriteTrackIds = favoriteTrackIds,
-                    onToggleTrackFavorite = if (onlineMode) onToggleTrackFavorite else null,
+                    onToggleTrackFavorite = onToggleTrackFavorite,
                     onSelectTrack = onSelectSearchTrack,
                 )
 
@@ -659,6 +694,7 @@ internal fun MainShell(
                     syncMode = syncMode,
                     lastFmConnection = lastFmConnection,
                     pendingPlayEventCount = pendingPlayEventCount,
+                    pendingPlayEventSyncProgress = pendingPlayEventSyncProgress,
                     waitingForLastFmSession = waitingForLastFmSession,
                     scrobblingPaused = scrobblingPaused,
                     showLyrics = showLyricsSetting,
@@ -669,6 +705,8 @@ internal fun MainShell(
                     downloadedTrackCount = downloadedTrackCount,
                     downloadedSizeBytes = downloadedSizeBytes,
                     cacheSizeBytes = cacheSizeBytes,
+                    appUpdateController = appUpdateController,
+                    appVersionName = appVersionName,
                     onUseLocalBackendChange = onUseLocalBackendChange,
                     onOfflineOnlyChange = onOfflineOnlyChange,
                     onScrobblingPausedChange = onScrobblingPausedChange,
@@ -682,6 +720,7 @@ internal fun MainShell(
                     onSyncLastFmUpdates = onSyncLastFmUpdates,
                     onClearDownloads = onClearDownloads,
                     onClearCache = onClearCache,
+                    onCheckUpdates = onCheckUpdates,
                     onSignOut = onSignOut,
                     )
                 }
@@ -725,13 +764,14 @@ internal fun MainShell(
                 canPlayRemoteTracks = canPlayRemoteTracks,
                 offlineAvailableTrackIds = offlineAvailableTrackIds,
                 queueTracks = queueTracks,
+                manualQueueFlags = manualQueueFlags,
                 queueCurrentIndex = queueCurrentIndex,
                 onSkipPrevious = onSkipPrevious,
                 onSkipNext = onSkipNext,
                 onShuffleChange = onShuffleChange,
                 onRepeatModeChange = onRepeatModeChange,
-                onToggleCurrentFavorite = onToggleCurrentFavorite.takeIf { onlineMode },
-                onAddCurrentTrackToPlaylist = onAddCurrentTrackToPlaylist.takeIf { onlineMode },
+                onToggleCurrentFavorite = onToggleCurrentFavorite,
+                onAddCurrentTrackToPlaylist = onAddCurrentTrackToPlaylist,
                 onGoToTrackArtist = onGoToTrackArtist,
                 onGoToTrackAlbum = onGoToTrackAlbum,
                 onRefreshCurrentLyrics = onRefreshCurrentLyrics.takeIf { onlineMode },
@@ -779,4 +819,21 @@ internal fun MainShell(
             )
         }
     }
+}
+
+private fun Track.navigationAlbum(): LibraryAlbum {
+    return LibraryAlbum(
+        id = albumId.orEmpty(),
+        title = album,
+        artist = albumArtist ?: playbackArtistNames(),
+        artistId = albumArtistId ?: artistId ?: artistIds.firstOrNull(),
+        artistIds = (listOfNotNull(albumArtistId, artistId) + artistIds)
+            .filter { it.isNotBlank() }
+            .distinct(),
+        releaseYear = releaseYear,
+        genre = genre,
+        trackCount = 0,
+        accentColor = accentColor,
+        artworkTrackId = id,
+    )
 }

@@ -13,6 +13,7 @@ data class SavedPlaybackState(
     val sourceTitle: String? = null,
     val queueTrackIds: List<String> = emptyList(),
     val sourceTrackIds: List<String> = emptyList(),
+    val manualQueueFlags: List<Boolean> = emptyList(),
     val queueTracks: List<Track> = emptyList(),
     val sourceTracks: List<Track> = emptyList(),
     val isShuffled: Boolean = false,
@@ -42,6 +43,7 @@ class PlaybackStateStore(context: Context) {
             sourceTitle = preferences.getString(KEY_SOURCE_TITLE, null)?.takeIf { it.isNotBlank() },
             queueTrackIds = preferences.getString(KEY_QUEUE_TRACK_IDS, null).toIdList(),
             sourceTrackIds = preferences.getString(KEY_SOURCE_TRACK_IDS, null).toIdList(),
+            manualQueueFlags = preferences.getString(KEY_MANUAL_QUEUE_FLAGS, null).toBooleanList(),
             queueTracks = preferences.getString(KEY_QUEUE_TRACKS_JSON, null).toTrackList(),
             sourceTracks = preferences.getString(KEY_SOURCE_TRACKS_JSON, null).toTrackList(),
             isShuffled = preferences.getBoolean(KEY_IS_SHUFFLED, false),
@@ -68,6 +70,7 @@ class PlaybackStateStore(context: Context) {
             .putString(KEY_SOURCE_TITLE, state.sourceTitle)
             .putString(KEY_QUEUE_TRACK_IDS, state.queueTrackIds.joinToString("\n"))
             .putString(KEY_SOURCE_TRACK_IDS, state.sourceTrackIds.joinToString("\n"))
+            .putString(KEY_MANUAL_QUEUE_FLAGS, state.manualQueueFlags.joinToString("\n") { if (it) "1" else "0" })
             .putString(KEY_QUEUE_TRACKS_JSON, state.queueTracks.toTrackJson())
             .putString(KEY_SOURCE_TRACKS_JSON, state.sourceTracks.toTrackJson())
             .putBoolean(KEY_IS_SHUFFLED, state.isShuffled)
@@ -140,6 +143,15 @@ class PlaybackStateStore(context: Context) {
             .lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
+            .toList()
+    }
+
+    private fun String?.toBooleanList(): List<Boolean> {
+        return orEmpty()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { it == "1" || it.equals("true", ignoreCase = true) }
             .toList()
     }
 
@@ -225,6 +237,7 @@ class PlaybackStateStore(context: Context) {
         const val KEY_SOURCE_TITLE = "source_title"
         const val KEY_QUEUE_TRACK_IDS = "queue_track_ids"
         const val KEY_SOURCE_TRACK_IDS = "source_track_ids"
+        const val KEY_MANUAL_QUEUE_FLAGS = "manual_queue_flags"
         const val KEY_QUEUE_TRACKS_JSON = "queue_tracks_json"
         const val KEY_SOURCE_TRACKS_JSON = "source_tracks_json"
         const val KEY_IS_SHUFFLED = "is_shuffled"

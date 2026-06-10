@@ -26,6 +26,7 @@ internal fun FullPlayerArtworkSection(
     lyricsLoading: Boolean,
     progressSeconds: Int,
     onRefreshLyrics: (() -> Unit)?,
+    onSeek: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -34,12 +35,12 @@ internal fun FullPlayerArtworkSection(
         verticalArrangement = Arrangement.Center,
     ) {
         SlidingArtworkTransition(
-            targetState = artworkBitmap,
+            targetState = track.id,
             direction = artworkTransitionDirection,
             label = "Full player artwork",
-        ) { bitmap ->
+        ) {
             ArtworkBox(
-                bitmap = bitmap,
+                bitmap = artworkBitmap,
                 accentColor = track.accentColor,
                 keepPreviousWhileLoading = false,
                 modifier = Modifier
@@ -56,6 +57,7 @@ internal fun FullPlayerArtworkSection(
                 lyricsLoading = lyricsLoading,
                 progressSeconds = progressSeconds,
                 onRefreshLyrics = onRefreshLyrics,
+                onSeek = onSeek,
             )
         }
     }

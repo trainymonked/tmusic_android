@@ -49,11 +49,19 @@ internal fun ActivePlayEvent.toPendingPlayEvent(): PendingPlayEvent {
 internal suspend fun syncPendingPlayEventBatches(
     store: PendingPlayEventStore,
     musicRepository: RemoteMusicRepository,
+    onProgress: (syncedCount: Int, totalCount: Int) -> Unit,
     onBatchSynced: (Set<String>) -> Unit,
 ): Throwable? {
-    store.events()
+    val events = store.events()
+    val totalCount = events.size
+    var syncedCount = 0
+    var requestedCount = 0
+    onProgress(syncedCount, totalCount)
+    events
         .chunked(PENDING_PLAY_EVENT_SYNC_BATCH_SIZE)
         .forEach { batch ->
+            requestedCount = (requestedCount + batch.size).coerceAtMost(totalCount)
+            onProgress(requestedCount, totalCount)
             val syncedIds = try {
                 musicRepository.syncPlayEvents(batch)
             } catch (error: CancellationException) {
@@ -63,6 +71,8 @@ internal suspend fun syncPendingPlayEventBatches(
             }
             if (syncedIds.isNotEmpty()) {
                 store.remove(syncedIds)
+                syncedCount += syncedIds.size
+                onProgress(maxOf(requestedCount, syncedCount).coerceAtMost(totalCount), totalCount)
                 onBatchSynced(syncedIds)
             }
         }

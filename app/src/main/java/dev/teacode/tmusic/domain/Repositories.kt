@@ -30,7 +30,7 @@ interface MusicRepository {
     suspend fun artistArtworkUrl(artistId: String, size: Int): String
     suspend fun playlistArtworkUrl(playlistId: String, size: Int): String
     suspend fun createPlaylist(name: String): Playlist
-    suspend fun updatePlaylist(playlistId: String, name: String, description: String): Playlist?
+    suspend fun updatePlaylist(playlistId: String, name: String): Playlist?
     suspend fun deletePlaylist(playlistId: String)
     suspend fun addTrackToPlaylist(playlistId: String, trackId: String): Playlist?
     suspend fun removeTrackFromPlaylist(playlistId: String, playlistTrackId: String): Playlist?

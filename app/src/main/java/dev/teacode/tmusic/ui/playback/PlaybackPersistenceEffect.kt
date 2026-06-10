@@ -37,6 +37,7 @@ internal fun persistPlaybackSnapshot(
             sourceTitle = queue.sourceTitle,
             queueTrackIds = queue.tracks.map { it.id },
             sourceTrackIds = queue.sourceTracks.map { it.id },
+            manualQueueFlags = queue.normalizedManualQueueFlags(),
             queueTracks = queue.tracks,
             sourceTracks = queue.sourceTracks,
             isShuffled = queue.isShuffled,

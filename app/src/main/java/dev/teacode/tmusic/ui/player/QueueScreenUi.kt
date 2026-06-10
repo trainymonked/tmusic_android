@@ -12,10 +12,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.teacode.tmusic.domain.Track
+import kotlin.math.max
+import kotlin.math.min
 
 @Composable
 fun QueueScreen(
     tracks: List<Track>,
+    manualQueueFlags: List<Boolean>,
     currentTrackId: String?,
     currentIndex: Int,
     artworkBitmaps: Map<String, ImageBitmap>,
@@ -52,8 +55,16 @@ fun QueueScreen(
                     )
                 }
             } else {
+                val windowStart = max(0, currentIndex - 10)
+                val windowEndExclusive = min(tracks.size, currentIndex + 21)
+                val visibleTracks = tracks.subList(windowStart, windowEndExclusive)
+                val visibleManualFlags = manualQueueFlags
+                    .let { flags -> tracks.indices.map { index -> flags.getOrNull(index) == true } }
+                    .subList(windowStart, windowEndExclusive)
                 QueueTrackList(
-                    tracks = tracks,
+                    tracks = visibleTracks,
+                    manualQueueFlags = visibleManualFlags,
+                    queueStartIndex = windowStart,
                     currentTrackId = currentTrackId,
                     currentIndex = currentIndex,
                     artworkBitmaps = artworkBitmaps,
@@ -65,7 +76,16 @@ fun QueueScreen(
                         onClose()
                     },
                     onRemoveTrack = onRemoveTrack,
-                    onReorderTracks = onReorderTracks,
+                    onReorderTracks = { reorderedWindowIndices ->
+                        val nextIndices = tracks.indices.toMutableList()
+                        reorderedWindowIndices.forEachIndexed { index, originalIndex ->
+                            val targetIndex = windowStart + index
+                            if (targetIndex in nextIndices.indices) {
+                                nextIndices[targetIndex] = originalIndex
+                            }
+                        }
+                        onReorderTracks(nextIndices)
+                    },
                     onGoToArtist = {
                         onGoToArtist(it)
                         onClose()

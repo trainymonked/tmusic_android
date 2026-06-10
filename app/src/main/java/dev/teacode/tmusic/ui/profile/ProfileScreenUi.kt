@@ -33,7 +33,7 @@ import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.LastFmConnection
 
 @Composable
-fun ProfileScreen(
+internal fun ProfileScreen(
     account: Account,
     avatarBitmap: ImageBitmap?,
     apiBaseUrl: String,
@@ -42,6 +42,7 @@ fun ProfileScreen(
     syncMode: SyncMode,
     lastFmConnection: LastFmConnection,
     pendingPlayEventCount: Int,
+    pendingPlayEventSyncProgress: Pair<Int, Int>?,
     waitingForLastFmSession: Boolean,
     scrobblingPaused: Boolean,
     showLyrics: Boolean,
@@ -52,6 +53,8 @@ fun ProfileScreen(
     downloadedTrackCount: Int,
     downloadedSizeBytes: Long,
     cacheSizeBytes: Long,
+    appUpdateController: AppUpdateController,
+    appVersionName: String,
     onUseLocalBackendChange: (Boolean) -> Unit,
     onOfflineOnlyChange: (Boolean) -> Unit,
     onScrobblingPausedChange: (Boolean) -> Unit,
@@ -65,6 +68,7 @@ fun ProfileScreen(
     onSyncLastFmUpdates: () -> Unit,
     onClearDownloads: () -> Unit,
     onClearCache: () -> Unit,
+    onCheckUpdates: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     LazyColumn(
@@ -79,10 +83,22 @@ fun ProfileScreen(
                 onSignOut = onSignOut,
             )
         }
+        appUpdateController.availableUpdate?.let { update ->
+            item {
+                ProfileUpdateSection(
+                    update = update,
+                    updateStatus = appUpdateController.downloadStatus,
+                    actionLabel = appUpdateController.actionLabel,
+                    actionEnabled = appUpdateController.actionEnabled,
+                    onOpenUpdate = { appUpdateController.openUpdate(update) },
+                )
+            }
+        }
         item {
             ProfileLastFmSection(
                 connection = lastFmConnection,
                 pendingPlayEventCount = pendingPlayEventCount,
+                syncProgress = pendingPlayEventSyncProgress,
                 scrobblingPaused = scrobblingPaused,
                 waitingForSession = waitingForLastFmSession,
                 canUseNetwork = canUseNetwork,
@@ -123,6 +139,13 @@ fun ProfileScreen(
                 offlineOnly = offlineOnly,
                 onUseLocalBackendChange = onUseLocalBackendChange,
                 onOfflineOnlyChange = onOfflineOnlyChange,
+            )
+        }
+        item {
+            ProfileAppInfoSection(
+                versionName = appVersionName,
+                updateCheckInProgress = appUpdateController.checkInProgress,
+                onCheckUpdates = onCheckUpdates,
             )
         }
     }

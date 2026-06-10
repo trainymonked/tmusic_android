@@ -22,6 +22,7 @@ fun ArtistsScreen(
     isRefreshing: Boolean,
     isLoadingMore: Boolean,
     canLoadMore: Boolean,
+    offlineNotice: String?,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
@@ -50,6 +51,9 @@ fun ArtistsScreen(
         ) {
             item {
                 HeaderBlock(title = "Artists", subtitle = "")
+            }
+            if (!offlineNotice.isNullOrBlank()) {
+                item { OfflineNotice(offlineNotice) }
             }
             if (artists.isEmpty()) {
                 item { EmptyState("No artists loaded yet") }

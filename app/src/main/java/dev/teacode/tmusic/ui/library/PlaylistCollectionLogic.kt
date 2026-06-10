@@ -18,6 +18,7 @@ internal fun List<Playlist>.updatePlaylist(
                     updatedPlaylist.isOfflineEnabled
                 },
                 isFavorites = updatedPlaylist.isFavorites || playlist.isFavorites,
+                totalDurationSeconds = updatedPlaylist.totalDurationSeconds ?: playlist.totalDurationSeconds,
             )
         } else {
             playlist
@@ -54,9 +55,13 @@ internal fun List<Playlist>.mergePlaylistMetadata(loadedPlaylists: List<Playlist
                 playlistTrackIdsByTrackId = existing.playlistTrackIdsByTrackId,
                 isOfflineEnabled = loaded.isOfflineEnabled || existing.isOfflineEnabled,
                 trackCount = maxOf(loaded.trackCount, existing.trackCount, existing.trackIds.size),
+                totalDurationSeconds = loaded.totalDurationSeconds ?: existing.totalDurationSeconds,
             )
         } else {
-            loaded.copy(isOfflineEnabled = loaded.isOfflineEnabled || existing?.isOfflineEnabled == true)
+            loaded.copy(
+                isOfflineEnabled = loaded.isOfflineEnabled || existing?.isOfflineEnabled == true,
+                totalDurationSeconds = loaded.totalDurationSeconds ?: existing?.totalDurationSeconds,
+            )
         }
     }
     val loadedIds = sanitizedLoadedPlaylists.map { it.id }.toSet()
@@ -81,11 +86,13 @@ internal fun List<Playlist>.mergeLoadedPlaylists(loadedPlaylists: List<Playlist>
                 isOfflineEnabled = loaded.isOfflineEnabled || existing.isOfflineEnabled,
                 isFavorites = loaded.isFavorites || existing.isFavorites,
                 trackCount = maxOf(loaded.trackCount, existing.trackCount, existing.trackIds.size),
+                totalDurationSeconds = loaded.totalDurationSeconds ?: existing.totalDurationSeconds,
             )
         } else {
             loaded.copy(
                 isOfflineEnabled = loaded.isOfflineEnabled || existing?.isOfflineEnabled == true,
                 isFavorites = loaded.isFavorites || existing?.isFavorites == true,
+                totalDurationSeconds = loaded.totalDurationSeconds ?: existing?.totalDurationSeconds,
             )
         }
     }

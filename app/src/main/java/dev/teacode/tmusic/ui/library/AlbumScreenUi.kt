@@ -55,6 +55,7 @@ fun AlbumScreen(
     isLoadingMore: Boolean,
     canLoadMore: Boolean,
     onLoadMore: () -> Unit,
+    offlineNotice: String?,
     onTogglePlayback: () -> Unit,
     onPlayAlbum: () -> Unit,
     onAddAlbumToLibrary: () -> Unit,
@@ -69,9 +70,12 @@ fun AlbumScreen(
     onToggleTrackFavorite: ((Track) -> Unit)?,
 ) {
     val coverTrackId = album?.let { albumArtworkKey(it, tracks, mapOf(it.id to tracks)) }
+    val expectedTrackCount = album?.trackCount?.coerceAtLeast(tracks.size) ?: tracks.size
+    val totalDurationSeconds = album?.totalDurationSeconds
+        ?: loadedTracksDurationSeconds(tracks, expectedTrackCount)
     val albumDownloadState = aggregateDownloadState(
         isOfflineEnabled = album?.isOfflineEnabled == true,
-        expectedTrackCount = album?.trackCount ?: tracks.size,
+        expectedTrackCount = expectedTrackCount,
         loadedTrackCount = tracks.size,
         tracks = tracks,
     )
@@ -115,7 +119,7 @@ fun AlbumScreen(
                 }
                 AlbumHeader(
                     album = album,
-                    subtitle = "",
+                    subtitle = album?.let { collectionStatsLabel(expectedTrackCount, totalDurationSeconds) }.orEmpty(),
                     onGoToAlbumArtist = onGoToAlbumArtist,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -153,7 +157,12 @@ fun AlbumScreen(
                         contentDescription = "Download album",
                         onClick = onDownloadAlbum,
                         enabled = album != null,
+                        animateQueued = canPlayFromNetwork,
                     )
+                }
+                if (!offlineNotice.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OfflineNotice(offlineNotice)
                 }
             }
             if (album == null) {

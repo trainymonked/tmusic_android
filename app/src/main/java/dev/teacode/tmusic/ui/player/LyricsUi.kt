@@ -43,6 +43,7 @@ fun LyricsBlock(
     lyricsLoading: Boolean,
     progressSeconds: Int,
     onRefreshLyrics: (() -> Unit)?,
+    onSeek: (Int) -> Unit,
 ) {
     var showFullLyrics by remember(lyrics) { mutableStateOf(false) }
     val syncedLines = remember(lyrics?.syncedLyrics) {
@@ -190,6 +191,7 @@ fun LyricsBlock(
             plainLyrics = plainLyrics,
             listState = fullLyricsListState,
             onRefreshLyrics = onRefreshLyrics,
+            onSeek = onSeek,
             onClose = { showFullLyrics = false },
         )
     }
@@ -202,7 +204,7 @@ private fun List<SyncedLyricLine>.twoVisibleLyricLines(progressSeconds: Int): Li
     val progressMs = progressSeconds.toLong().coerceAtLeast(0L) * 1000L
     val currentIndex = indexOfLast { it.timeMs <= progressMs }
     if (currentIndex >= lastIndex) {
-        return listOf("\u2022\u2022\u2022")
+        return listOf(getOrNull(currentIndex)?.text.orEmpty().ifBlank { "\u2022\u2022\u2022" })
     }
     val currentText = if (currentIndex < 0) "\u2022\u2022\u2022" else getOrNull(currentIndex)?.text.orEmpty()
     val nextText = getOrNull(currentIndex + 1)?.text.orEmpty()
@@ -239,6 +241,5 @@ private fun String.parseSyncedLyrics(): List<SyncedLyricLine> {
                 text = match.groupValues[4].trim(),
             )
         }
-        .filter { it.text.isNotBlank() }
         .toList()
 }

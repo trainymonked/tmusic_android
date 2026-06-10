@@ -38,6 +38,7 @@ internal fun PlayerOverlayHost(
     canPlayRemoteTracks: Boolean,
     offlineAvailableTrackIds: Set<String>,
     queueTracks: List<Track>,
+    manualQueueFlags: List<Boolean>,
     queueCurrentIndex: Int,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
@@ -122,6 +123,7 @@ internal fun PlayerOverlayHost(
         QueueScreen(
             tracks = queueTracks.takeIf { it.isNotEmpty() }
                 ?: playerState.currentTrack?.let(::listOf).orEmpty(),
+            manualQueueFlags = manualQueueFlags,
             currentTrackId = playerState.currentTrack?.id,
             currentIndex = queueCurrentIndex,
             artworkBitmaps = artworkBitmaps,

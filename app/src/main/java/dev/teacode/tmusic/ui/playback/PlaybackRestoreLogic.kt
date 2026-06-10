@@ -49,6 +49,9 @@ internal fun SavedPlaybackState.restorePlayback(
         sourceTitle = savedPlaylist?.title ?: sourceTitle ?: "Search",
         tracks = restoredTracks,
         sourceTracks = restoredSourceTracks,
+        manualQueueFlags = manualQueueFlags
+            .takeIf { it.size == restoredTracks.size }
+            ?: List(restoredTracks.size) { false },
         isShuffled = isShuffled,
         currentIndex = restoredIndex,
     )

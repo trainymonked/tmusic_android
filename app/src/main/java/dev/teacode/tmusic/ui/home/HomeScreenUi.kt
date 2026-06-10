@@ -29,6 +29,7 @@ fun HomeScreen(
     onlineMode: Boolean,
     syncMode: SyncMode,
     isLoading: Boolean,
+    playableTrackIds: Set<String>,
     onRefresh: () -> Unit,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     onShowAllArtists: () -> Unit,
@@ -80,29 +81,27 @@ fun HomeScreen(
                     status = status,
                 )
             }
-            if (onlineMode || syncMode == SyncMode.Online || syncMode == SyncMode.Syncing) {
-                item {
-                    HorizontalLibrarySection(
-                        title = "Artists",
-                        isEmpty = artists.isEmpty(),
-                        emptyText = "No artists loaded yet",
-                        onShowAll = onShowAllArtists,
-                    ) {
-                        items(artists.take(12), key = { it.id }) { artist ->
-                            val coverTrackId = artistArtworkKey(artist)
-                            ArtistCard(
-                                artist = artist,
-                                artworkBitmap = artworkBitmaps.artworkBitmap(coverTrackId, ArtworkImageSize.AlbumGrid),
-                                coverTrackId = coverTrackId,
-                                onRequestArtwork = onRequestArtwork,
-                                onClick = { onSelectArtist(artist) },
-                                modifier = Modifier.width(112.dp),
-                            )
-                        }
+            item {
+                HorizontalLibrarySection(
+                    title = "Artists",
+                    isEmpty = artists.isEmpty(),
+                    emptyText = "No artists loaded yet",
+                    onShowAll = onShowAllArtists,
+                ) {
+                    items(artists.take(12), key = { it.id }) { artist ->
+                        val coverTrackId = artistArtworkKey(artist)
+                        ArtistCard(
+                            artist = artist,
+                            artworkBitmap = artworkBitmaps.artworkBitmap(coverTrackId, ArtworkImageSize.AlbumGrid),
+                            coverTrackId = coverTrackId,
+                            onRequestArtwork = onRequestArtwork,
+                            onClick = { onSelectArtist(artist) },
+                            modifier = Modifier.width(112.dp),
+                        )
                     }
                 }
             }
-            if ((onlineMode || syncMode == SyncMode.Online || syncMode == SyncMode.Syncing) && recentTracks.isNotEmpty()) {
+            if (recentTracks.isNotEmpty()) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         SectionTitle("Latest tracks", modifier = Modifier.padding(top = 2.dp, bottom = 2.dp))
@@ -120,6 +119,7 @@ fun HomeScreen(
                                     onGoToAlbum = track.albumId?.let { { onGoToTrackAlbum(track) } },
                                     isFavorite = track.id in favoriteTrackIds,
                                     onToggleFavorite = onToggleTrackFavorite?.let { toggle -> { toggle(track) } },
+                                    enabled = onlineMode || track.id in playableTrackIds,
                                 )
                             }
                         }

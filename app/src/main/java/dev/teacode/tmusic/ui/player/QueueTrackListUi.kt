@@ -2,12 +2,16 @@ package dev.teacode.tmusic.ui
 
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,11 +30,14 @@ import dev.teacode.tmusic.domain.Track
 private data class QueueListItem(
     val originalIndex: Int,
     val track: Track,
+    val isManualQueueItem: Boolean,
 )
 
 @Composable
 internal fun ColumnScope.QueueTrackList(
     tracks: List<Track>,
+    manualQueueFlags: List<Boolean>,
+    queueStartIndex: Int,
     currentTrackId: String?,
     currentIndex: Int,
     artworkBitmaps: Map<String, ImageBitmap>,
@@ -44,12 +51,18 @@ internal fun ColumnScope.QueueTrackList(
     onGoToAlbum: (Track) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val queueIdentity = remember(tracks) {
-        tracks.mapIndexed { index, track -> "$index:${track.id}" }
+    val queueIdentity = remember(tracks, manualQueueFlags, queueStartIndex) {
+        tracks.mapIndexed { index, track ->
+            "${queueStartIndex + index}:${track.id}:${manualQueueFlags.getOrNull(index) == true}"
+        }
     }
     val initialItems = remember(queueIdentity) {
         tracks.mapIndexed { index, track ->
-            QueueListItem(originalIndex = index, track = track)
+            QueueListItem(
+                originalIndex = queueStartIndex + index,
+                track = track,
+                isManualQueueItem = manualQueueFlags.getOrNull(index) == true,
+            )
         }
     }
     var displayedItems by remember { mutableStateOf(initialItems) }
@@ -69,7 +82,7 @@ internal fun ColumnScope.QueueTrackList(
         }
         val activeIndex = displayedItems.indexOfFirst { item ->
             item.originalIndex == currentIndex ||
-                (currentIndex !in tracks.indices && item.track.id == currentTrackId)
+                (currentIndex !in (queueStartIndex until queueStartIndex + tracks.size) && item.track.id == currentTrackId)
         }
         if (activeIndex >= 0) {
             listState.scrollToItem(activeIndex)
@@ -102,18 +115,7 @@ internal fun ColumnScope.QueueTrackList(
             val track = item.track
             val canPlayTrack = canPlayFromNetwork || track.id in offlinePlayableTrackIds
             val itemKey = "queue:${item.originalIndex}:${track.id}"
-            TrackRow(
-                track = track,
-                artworkBitmap = artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.TrackList),
-                onRequestArtwork = onRequestArtwork,
-                onClick = { onSelectTrack(item.originalIndex) },
-                onRemoveFromQueue = { onRemoveTrack(item.originalIndex) },
-                onGoToArtist = { onGoToArtist(track) },
-                onGoToAlbum = track.albumId?.let { { onGoToAlbum(track) } },
-                isActive = item.originalIndex == currentIndex ||
-                    (currentIndex !in tracks.indices && track.id == currentTrackId),
-                showDownloadBadge = false,
-                enabled = canPlayTrack,
+            Column(
                 modifier = Modifier
                     .zIndex(if (draggedKey == itemKey) 1f else 0f)
                     .graphicsLayer {
@@ -151,7 +153,36 @@ internal fun ColumnScope.QueueTrackList(
                             },
                         )
                     },
-            )
+            ) {
+                if (item.isManualQueueItem && displayedItems.getOrNull(index - 1)?.isManualQueueItem != true) {
+                    Text(
+                        text = "Added to queue",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 52.dp, top = 6.dp, bottom = 2.dp),
+                    )
+                }
+                TrackRow(
+                    track = track,
+                    artworkBitmap = artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.TrackList),
+                    onRequestArtwork = onRequestArtwork,
+                    onClick = { onSelectTrack(item.originalIndex) },
+                    onRemoveFromQueue = { onRemoveTrack(item.originalIndex) },
+                    onGoToArtist = { onGoToArtist(track) },
+                    onGoToAlbum = track.albumId?.let { { onGoToAlbum(track) } },
+                    isActive = item.originalIndex == currentIndex ||
+                        (currentIndex !in (queueStartIndex until queueStartIndex + tracks.size) && track.id == currentTrackId),
+                    showDownloadBadge = false,
+                    enabled = canPlayTrack,
+                    modifier = Modifier.then(
+                        if (item.isManualQueueItem) {
+                            Modifier.padding(start = 8.dp)
+                        } else {
+                            Modifier
+                        },
+                    ),
+                )
+            }
         }
     }
 }

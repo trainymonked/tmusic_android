@@ -7,6 +7,7 @@ import android.content.Intent
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 
 class GoogleSignInTokenProvider(
     context: Context,
@@ -26,8 +27,12 @@ class GoogleSignInTokenProvider(
 
     fun idTokenFromIntent(data: Intent?): Result<String> {
         return runCatching {
-            val account = GoogleSignIn.getSignedInAccountFromIntent(data)
-                .getResult(ApiException::class.java)
+            val account = try {
+                GoogleSignIn.getSignedInAccountFromIntent(data)
+                    .getResult(ApiException::class.java)
+            } catch (error: ApiException) {
+                throw error.asUserFacingException()
+            }
             account.idToken
                 ?: throw IllegalStateException("Google Sign-In did not return an idToken.")
         }
@@ -36,4 +41,17 @@ class GoogleSignInTokenProvider(
     fun signOut() {
         client.signOut()
     }
+}
+
+private fun ApiException.asUserFacingException(): IllegalStateException {
+    val message = when (statusCode) {
+        CommonStatusCodes.DEVELOPER_ERROR -> {
+            "Google Sign-In configuration mismatch. Register this app package and signing certificate in Google Cloud."
+        }
+
+        CommonStatusCodes.CANCELED -> "Google Sign-In was cancelled."
+        CommonStatusCodes.NETWORK_ERROR -> "Google Sign-In could not connect to Google."
+        else -> "Google Sign-In failed (${statusCode})."
+    }
+    return IllegalStateException(message, this)
 }

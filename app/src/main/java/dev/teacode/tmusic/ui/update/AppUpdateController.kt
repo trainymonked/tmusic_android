@@ -1,0 +1,211 @@
+package dev.teacode.tmusic.ui
+
+import android.app.DownloadManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import dev.teacode.tmusic.data.AppUpdateChecker
+import dev.teacode.tmusic.data.AppUpdateInfo
+import dev.teacode.tmusic.data.UserPreferencesStore
+import dev.teacode.tmusic.data.isAppVersionNewer
+import kotlinx.coroutines.CancellationException
+
+internal class AppUpdateController(
+    private val context: Context,
+    private val userPreferencesStore: UserPreferencesStore,
+    private val appUpdateChecker: AppUpdateChecker,
+    private val currentVersion: String,
+    initialUpdate: AppUpdateInfo?,
+    private val onNotice: (String?) -> Unit,
+    private val onError: (String?) -> Unit,
+) {
+    var availableUpdate by mutableStateOf(initialUpdate)
+        private set
+    var dialogUpdate by mutableStateOf<AppUpdateInfo?>(null)
+        private set
+    var checkInProgress by mutableStateOf(false)
+        private set
+    var downloadId by mutableStateOf<Long?>(null)
+        private set
+    var downloadedVersion by mutableStateOf<String?>(null)
+        private set
+    var installUri by mutableStateOf<Uri?>(null)
+        private set
+    var downloadStatus by mutableStateOf<String?>(null)
+        private set
+
+    val readyToInstall: Boolean
+        get() = availableUpdate?.version == downloadedVersion && installUri != null
+
+    val actionLabel: String
+        get() = when {
+            readyToInstall -> "Install"
+            downloadId != null -> "Downloading"
+            else -> "Update"
+        }
+
+    val actionEnabled: Boolean
+        get() = downloadId == null
+
+    fun dismissDialog() {
+        dialogUpdate = null
+    }
+
+    fun openUpdate(update: AppUpdateInfo?) {
+        val selectedUpdate = update ?: return
+        if (readyToInstall && downloadedVersion == selectedUpdate.version) {
+            installDownloadedUpdate(installUri)
+            return
+        }
+        if (downloadId != null) {
+            downloadStatus = "Downloading update..."
+            return
+        }
+        val url = selectedUpdate.downloadUrl.takeIf { it.isNotBlank() } ?: return
+        val uri = Uri.parse(url)
+        if (url.endsWith(".apk", ignoreCase = true)) {
+            enqueueApkDownload(selectedUpdate, uri)
+        } else {
+            openExternalUrl(uri)
+        }
+    }
+
+    suspend fun checkForUpdate(
+        manual: Boolean,
+        canCheck: Boolean,
+        debugStatus: String,
+    ) {
+        if (!canCheck || checkInProgress) {
+            Log.d(
+                APP_UPDATE_LOG_TAG,
+                "skip check manual=$manual canCheck=$canCheck inProgress=$checkInProgress $debugStatus",
+            )
+            if (manual && !canCheck) {
+                onError("Connect to the internet before checking updates.")
+            }
+            return
+        }
+        val now = System.currentTimeMillis()
+        val elapsedSinceLastCheck = now - userPreferencesStore.lastUpdateCheckEpochMs()
+        if (!manual && elapsedSinceLastCheck < APP_UPDATE_CHECK_INTERVAL_MS) {
+            Log.d(
+                APP_UPDATE_LOG_TAG,
+                "skip automatic check by throttle elapsedMs=$elapsedSinceLastCheck intervalMs=$APP_UPDATE_CHECK_INTERVAL_MS",
+            )
+            return
+        }
+        userPreferencesStore.setLastUpdateCheckEpochMs(now)
+        checkInProgress = true
+        Log.d(APP_UPDATE_LOG_TAG, "run check manual=$manual currentVersion=$currentVersion")
+        val update = try {
+            appUpdateChecker.latestUpdate(currentVersion)
+        } catch (error: CancellationException) {
+            checkInProgress = false
+            throw error
+        } catch (error: Throwable) {
+            Log.w(APP_UPDATE_LOG_TAG, "check failed manual=$manual", error)
+            null
+        } finally {
+            checkInProgress = false
+        }
+        if (update != null) {
+            Log.d(APP_UPDATE_LOG_TAG, "new update available version=${update.version} url=${update.downloadUrl}")
+            availableUpdate = update
+            userPreferencesStore.setCachedAppUpdate(update)
+            if (manual || userPreferencesStore.lastPromptedUpdateVersion() != update.version) {
+                userPreferencesStore.setLastPromptedUpdateVersion(update.version)
+                dialogUpdate = update
+            }
+            if (manual) {
+                onNotice("Update ${update.version} is available.")
+            }
+        } else if (availableUpdate?.let { isAppVersionNewer(it.version, currentVersion) } != true) {
+            Log.d(APP_UPDATE_LOG_TAG, "no newer update available")
+            userPreferencesStore.clearCachedAppUpdate()
+            if (manual) {
+                onNotice("No updates found.")
+            }
+        }
+    }
+
+    fun onDownloaded(uri: Uri?) {
+        downloadId = null
+        downloadedVersion = availableUpdate?.version
+        installUri = uri
+        downloadStatus = if (uri != null) {
+            "Ready to install."
+        } else {
+            "Downloaded, but installer is unavailable."
+        }
+        onNotice(downloadStatus)
+        if (uri != null) {
+            availableUpdate?.let { dialogUpdate = it }
+        }
+    }
+
+    fun onDownloadFailed(reason: Int) {
+        downloadId = null
+        downloadStatus = "Download failed."
+        onError("Update download failed. Reason: $reason")
+    }
+
+    fun onDownloadUnknown() {
+        downloadId = null
+        downloadStatus = "Download status is unknown."
+    }
+
+    private fun enqueueApkDownload(update: AppUpdateInfo, uri: Uri) {
+        val fileName = "TMusic-${update.version}.apk"
+        runCatching {
+            val request = DownloadManager.Request(uri)
+                .setTitle("TMusic ${update.version}")
+                .setDescription("Downloading update")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            val downloadManager = context.getSystemService(DownloadManager::class.java)
+            downloadId = downloadManager.enqueue(request)
+            downloadedVersion = null
+            installUri = null
+            downloadStatus = "Downloading update..."
+            onNotice("Update download started.")
+        }.onFailure {
+            downloadId = null
+            downloadStatus = "Download could not be started."
+            onError("Could not start the update download.")
+        }
+    }
+
+    private fun installDownloadedUpdate(uri: Uri?) {
+        if (uri == null) {
+            onError("Update is not ready to install yet.")
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching {
+            context.startActivity(intent)
+        }.onFailure {
+            onError("Could not open the update installer.")
+        }
+    }
+
+    private fun openExternalUrl(uri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW, uri)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching {
+            context.startActivity(intent)
+        }.onFailure {
+            onError("Could not open the update link.")
+        }
+    }
+
+    private companion object {
+        const val APP_UPDATE_LOG_TAG = "TMusicUpdate"
+    }
+}

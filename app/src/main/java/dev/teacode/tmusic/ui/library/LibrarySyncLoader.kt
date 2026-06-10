@@ -15,16 +15,25 @@ internal suspend fun fetchLibraryState(
     val loadedAccount = authRepository.currentAccount()
     var loadedPlaylists: List<Playlist>? = null
     var loadedTracks: List<Track>? = null
+    var loadedRecentTracks: List<Track>? = null
     var loadedArtists: List<LibraryArtist>? = null
     var loadedAlbums: List<LibraryAlbum>? = null
     var loadedSavedAlbums: List<LibraryAlbum>? = null
+
+    val baseLibrary = musicRepository.libraryPage(
+        playlistLimit = SCREEN_PAGE_LIMIT,
+        trackLimit = 0,
+    )
+    loadedPlaylists = baseLibrary.playlists
+    loadedTracks = baseLibrary.tracks
+    loadedSavedAlbums = musicRepository.savedAlbumsPage(limit = SCREEN_PAGE_LIMIT)
 
     when (targetDestination.tab) {
         AppTab.Home -> when (targetDestination.homeRoute) {
             HomeRoute.Overview -> {
                 val artistPage = musicRepository.libraryArtistsPageWithTotal(limit = HOME_ARTIST_PREVIEW_LIMIT)
                 loadedArtists = artistPage.artists.filterOwnReleaseArtists()
-                loadedTracks = musicRepository.recentTracks(limit = 25)
+                loadedRecentTracks = musicRepository.recentTracks(limit = 25)
             }
             HomeRoute.Artists -> {
                 val artistPage = musicRepository.libraryArtistsPageWithTotal(limit = SCREEN_PAGE_LIMIT)
@@ -36,15 +45,7 @@ internal suspend fun fetchLibraryState(
             HomeRoute.Artist,
             HomeRoute.Album -> Unit
         }
-        AppTab.Library -> {
-            val loadedLibrary = musicRepository.libraryPage(
-                playlistLimit = SCREEN_PAGE_LIMIT,
-                trackLimit = 0,
-            )
-            loadedPlaylists = loadedLibrary.playlists
-            loadedTracks = loadedLibrary.tracks
-            loadedSavedAlbums = musicRepository.savedAlbumsPage(limit = SCREEN_PAGE_LIMIT)
-        }
+        AppTab.Library -> Unit
         AppTab.Search,
         AppTab.Profile -> Unit
     }
@@ -53,7 +54,7 @@ internal suspend fun fetchLibraryState(
         account = loadedAccount,
         playlists = loadedPlaylists,
         tracks = loadedTracks,
-        recentTracks = if (targetDestination.isHomeOverview()) loadedTracks else null,
+        recentTracks = loadedRecentTracks,
         trackCount = if (targetDestination.isHomeOverview()) {
             runCatching { musicRepository.tracksCount() }.getOrNull()
         } else {

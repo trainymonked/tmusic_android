@@ -95,6 +95,25 @@ class TMusicApiClient(
         return user.toAccount()
     }
 
+    suspend fun logout() = withContext(Dispatchers.IO) {
+        val tokens = sessionStore.tokens() ?: return@withContext
+        val body = JSONObject()
+            .put("refreshToken", tokens.refreshToken)
+            .toString()
+        val response = execute(
+            method = "POST",
+            path = "/auth/logout",
+            body = body,
+            accessToken = tokens.accessToken,
+        )
+        if (response.statusCode !in 200..299 && response.statusCode != HttpURLConnection.HTTP_UNAUTHORIZED) {
+            throw TMusicApiException(
+                statusCode = response.statusCode,
+                message = response.errorMessage(),
+            )
+        }
+    }
+
     suspend fun playlists(): List<Playlist> {
         return playlistsPayload().playlists
     }
@@ -587,10 +606,9 @@ class TMusicApiClient(
         return playlist.toPlaylist()
     }
 
-    suspend fun updatePlaylist(playlistId: String, name: String, description: String): Playlist? {
+    suspend fun updatePlaylist(playlistId: String, name: String): Playlist? {
         val body = JSONObject()
             .put("name", name)
-            .put("description", description)
             .toString()
         val responseBody = request(
             method = "PATCH",
@@ -845,6 +863,28 @@ class TMusicApiClient(
             authenticated = true,
         )
         return responseBody.syncedClientEventIds(defaultIds = events.map { it.clientEventId }.toSet())
+    }
+
+    suspend fun syncLibraryMutations(mutations: List<PendingLibraryMutation>): Set<String> {
+        if (mutations.isEmpty()) {
+            return emptySet()
+        }
+        val body = JSONObject()
+            .put(
+                "operations",
+                JSONArray().apply {
+                    mutations.forEach { mutation -> put(mutation.toJson()) }
+                },
+            )
+            .toString()
+
+        val responseBody = request(
+            method = "POST",
+            path = "/library/sync",
+            body = body,
+            authenticated = true,
+        )
+        return responseBody.syncedClientMutationIds(defaultIds = mutations.map { it.clientMutationId }.toSet())
     }
 
     private suspend fun <T> pagedList(
@@ -1153,7 +1193,11 @@ private fun JSONObject.requireString(name: String): String {
 private fun JSONObject.optionalString(vararg names: String): String? {
     for (name in names) {
         if (has(name)) {
-            val value = optString(name)
+            val rawValue = opt(name)
+            if (rawValue is JSONObject || rawValue is JSONArray || rawValue == JSONObject.NULL) {
+                continue
+            }
+            val value = rawValue?.toString().orEmpty()
             if (value.isMeaningfulString()) {
                 return value
             }
@@ -1293,32 +1337,23 @@ private fun JSONObject.stableId(fallbackPrefix: String): String {
 }
 
 private fun JSONObject.artistIdList(): List<String> {
-    val directIds = listOfNotNull(optionalString("artistId", "primaryArtistId", "albumArtistId"))
-    val arrayIds = listOfNotNull(
+    val directIds = listOfNotNull(optionalString("artistId", "primaryArtistId", "albumArtistId", "trackArtistId"))
+    val directArrayIds = listOfNotNull(
         optJSONArray("artistIds"),
+        optJSONArray("primaryArtistIds"),
+        optJSONArray("albumArtistIds"),
+        optJSONArray("trackArtistIds"),
+    ).flatMap { array -> array.artistIdValues(allowPrimitiveIds = true) }
+    val dtoArrayIds = listOfNotNull(
         optJSONArray("artists"),
         optJSONArray("artistEntities"),
         optJSONArray("trackArtists"),
         optJSONArray("trackArtistEntities"),
         optJSONArray("albumArtists"),
         optJSONArray("albumArtistEntities"),
-    ).flatMap { array ->
-        buildList {
-            for (index in 0 until array.length()) {
-                when (val value = array.opt(index)) {
-                    is JSONObject -> (
-                        value.optionalString("artistId", "primaryArtistId", "albumArtistId", "trackArtistId")
-                            ?: value.optJSONObject("artist")?.optionalString("id", "_id", "artistId")
-                            ?: value.optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId")
-                            ?: value.optJSONObject("albumArtist")?.optionalString("id", "_id", "artistId")
-                            ?: value.optJSONObject("trackArtist")?.optionalString("id", "_id", "artistId")
-                            ?: value.optionalString("id", "_id")
-                        )?.let(::add)
-                    else -> value.toString().takeIf { it.isNotBlank() }?.let(::add)
-                }
-            }
-        }
-    }
+        optJSONArray("primaryArtists"),
+        optJSONArray("primaryArtistEntities"),
+    ).flatMap { array -> array.artistIdValues(allowPrimitiveIds = false) }
     val objectIds = listOfNotNull(
         optJSONObject("artist")?.optionalString("id", "_id", "artistId"),
         optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId"),
@@ -1326,8 +1361,30 @@ private fun JSONObject.artistIdList(): List<String> {
         optJSONObject("albumArtistEntity")?.optionalString("id", "_id", "artistId"),
         optJSONObject("primaryArtist")?.optionalString("id", "_id", "artistId"),
         optJSONObject("primaryArtistEntity")?.optionalString("id", "_id", "artistId"),
+        optJSONObject("trackArtist")?.optionalString("id", "_id", "artistId"),
+        optJSONObject("trackArtistEntity")?.optionalString("id", "_id", "artistId"),
     )
-    return (directIds + arrayIds + objectIds).distinct()
+    return (directIds + directArrayIds + dtoArrayIds + objectIds).distinct()
+}
+
+private fun JSONArray.artistIdValues(allowPrimitiveIds: Boolean): List<String> {
+    return buildList {
+        for (index in 0 until length()) {
+            when (val value = opt(index)) {
+                is JSONObject -> (
+                    value.optionalString("artistId", "primaryArtistId", "albumArtistId", "trackArtistId")
+                        ?: value.optJSONObject("artist")?.optionalString("id", "_id", "artistId")
+                        ?: value.optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId")
+                        ?: value.optJSONObject("albumArtist")?.optionalString("id", "_id", "artistId")
+                        ?: value.optJSONObject("trackArtist")?.optionalString("id", "_id", "artistId")
+                        ?: value.optionalString("id", "_id")
+                    )?.let(::add)
+                else -> if (allowPrimitiveIds) {
+                    value.toString().takeIf { it.isMeaningfulString() }?.let(::add)
+                }
+            }
+        }
+    }
 }
 
 private fun JSONObject.artistNameList(): List<String> {
@@ -1339,11 +1396,12 @@ private fun JSONObject.artistNameList(): List<String> {
         optJSONArray("trackArtistEntities"),
         optJSONArray("albumArtists"),
         optJSONArray("albumArtistEntities"),
+        optJSONArray("primaryArtists"),
+        optJSONArray("primaryArtistEntities"),
     ).flatMap { array ->
         buildList {
             for (index in 0 until array.length()) {
-                val value = array.opt(index)
-                when (value) {
+                when (val value = array.opt(index)) {
                     is JSONObject -> (
                         value.optJSONObject("artist")?.optionalString("name", "title", "artist", "artistName")
                             ?: value.optJSONObject("artistEntity")?.optionalString("name", "title", "artist", "artistName")
@@ -1351,7 +1409,7 @@ private fun JSONObject.artistNameList(): List<String> {
                             ?: value.optJSONObject("trackArtist")?.optionalString("name", "title", "artist", "artistName")
                             ?: value.optionalString("name", "title", "artist", "artistName")
                         )?.let(::add)
-                    else -> value.toString().takeIf { it.isNotBlank() }?.let(::add)
+                    else -> value.toString().takeIf { it.isMeaningfulString() }?.let(::add)
                 }
             }
         }
@@ -1363,6 +1421,8 @@ private fun JSONObject.artistNameList(): List<String> {
         optJSONObject("albumArtistEntity")?.optionalString("name", "title", "artist", "artistName"),
         optJSONObject("primaryArtist")?.optionalString("name", "title", "artist", "artistName"),
         optJSONObject("primaryArtistEntity")?.optionalString("name", "title", "artist", "artistName"),
+        optJSONObject("trackArtist")?.optionalString("name", "title", "artist", "artistName"),
+        optJSONObject("trackArtistEntity")?.optionalString("name", "title", "artist", "artistName"),
     )
     return (directNames + arrayNames + objectNames)
         .map { it.trim() }
@@ -1372,6 +1432,9 @@ private fun JSONObject.artistNameList(): List<String> {
 
 private fun JSONObject.albumArtistId(): String? {
     val albumEntity = optJSONObject("albumEntity")
+        ?: optJSONObject("album")
+        ?: optJSONObject("albumDto")
+        ?: optJSONObject("albumObject")
     return albumEntity?.optionalString("artistId", "albumArtistId")
         ?: albumEntity?.optJSONObject("artist")?.optionalString("id", "_id", "artistId")
         ?: albumEntity?.optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId")
@@ -1417,7 +1480,6 @@ private fun JSONObject.toPlaylist(): Playlist {
     return Playlist(
         id = id,
         title = optionalString("title", "name") ?: "Untitled playlist",
-        description = optionalString("description") ?: "",
         trackIds = trackIds,
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
         isPublic = optBoolean("isPublic", false),
@@ -1426,6 +1488,7 @@ private fun JSONObject.toPlaylist(): Playlist {
         isFavorites = optBoolean("isFavorites", false) ||
             optionalString("type", "kind", "systemKey")?.equals("favorites", ignoreCase = true) == true,
         trackCount = trackCount.coerceAtLeast(trackIds.size),
+        totalDurationSeconds = totalDurationSeconds(),
     )
 }
 
@@ -1527,6 +1590,9 @@ private fun JSONObject.embeddedTracks(): List<Track> {
 private fun JSONObject.toTrack(accentColor: Long): Track {
     val id = stableId("track")
     val albumEntity = optJSONObject("albumEntity")
+        ?: optJSONObject("album")
+        ?: optJSONObject("albumDto")
+        ?: optJSONObject("albumObject")
     val artistIds = artistIdList()
     val artistNames = artistNameList()
     val albumArtistNames = albumEntity?.artistNameList().orEmpty()
@@ -1664,6 +1730,7 @@ private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
         savedByCurrentUser = optBoolean("savedByCurrentUser", false),
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
         hasArtwork = hasArtworkMetadata(),
+        totalDurationSeconds = totalDurationSeconds(),
     )
 }
 
@@ -1687,6 +1754,20 @@ private fun JSONObject.durationSeconds(): Int {
         has("durationMs") -> optInt("durationMs") / 1000
         else -> 0
     }
+}
+
+private fun JSONObject.totalDurationSeconds(): Int? {
+    optionalInt("totalDurationSeconds", "durationSeconds")?.let { return it.coerceAtLeast(0) }
+    optionalInt("totalDurationMs", "durationMs")?.let { return (it / 1000).coerceAtLeast(0) }
+    optJSONObject("_sum")?.let { sum ->
+        sum.optionalInt("durationSeconds")?.let { return it.coerceAtLeast(0) }
+        sum.optionalInt("durationMs")?.let { return (it / 1000).coerceAtLeast(0) }
+    }
+    optJSONObject("duration")?.let { duration ->
+        duration.optionalInt("seconds")?.let { return it.coerceAtLeast(0) }
+        duration.optionalInt("ms")?.let { return (it / 1000).coerceAtLeast(0) }
+    }
+    return null
 }
 
 private fun String.toJsonArray(key: String): JSONArray {
@@ -1749,7 +1830,6 @@ private fun String.toFavoritesPlaylistPayload(
             ?: root.optionalString("id", "_id", "playlistId")
             ?: "favorites",
         title = basePlaylist?.title?.takeIf { it.isNotBlank() } ?: "Favorites",
-        description = basePlaylist?.description.orEmpty(),
         trackIds = trackIds,
         isOfflineEnabled = fallbackIsOfflineEnabled || basePlaylist?.isOfflineEnabled == true,
         isPublic = basePlaylist?.isPublic == true,
@@ -1757,6 +1837,7 @@ private fun String.toFavoritesPlaylistPayload(
         playlistTrackIdsByTrackId = playlistTrackIdsByTrackId,
         isFavorites = true,
         trackCount = trackCount.coerceAtLeast(trackIds.size),
+        totalDurationSeconds = root.totalDurationSeconds() ?: basePlaylist?.totalDurationSeconds,
     )
 
     return PlaylistPayload(
@@ -1792,7 +1873,6 @@ private fun JSONObject.isPlaylistObject(): Boolean {
     val hasIdentity = optionalString("id", "_id", "playlistId") != null ||
         optionalString("title", "name") != null
     val hasPlaylistShape = optionalString("title", "name") != null ||
-        has("description") ||
         has("isFavorites") ||
         has("isPublic") ||
         has("trackIds") ||
@@ -1826,6 +1906,10 @@ private fun List<PlaylistPayload>.mergeSinglePlaylistPayload(): PlaylistPayload 
         playlistTrackIds = playlistTrackIds,
         playlistTrackIdsByTrackId = playlistTrackIdsByTrackId,
         trackCount = firstPlaylist.trackCount.coerceAtLeast(trackIds.size),
+        totalDurationSeconds = asSequence()
+            .flatMap { it.playlists.asSequence() }
+            .mapNotNull { it.totalDurationSeconds }
+            .firstOrNull(),
     )
     return PlaylistPayload(
         playlists = listOf(playlist),
@@ -2101,6 +2185,25 @@ private fun String.syncedClientEventIds(defaultIds: Set<String>): Set<String> {
                 val result = results.optJSONObject(index) ?: continue
                 if (result.optBoolean("ok", false)) {
                     result.optionalString("clientEventId")?.let(::add)
+                }
+            }
+        }
+    }.getOrDefault(emptySet())
+}
+
+private fun String.syncedClientMutationIds(defaultIds: Set<String>): Set<String> {
+    val trimmed = trim()
+    if (trimmed.isBlank()) {
+        return defaultIds
+    }
+    return runCatching {
+        val root = JSONObject(trimmed).payloadObject()
+        val results = root.optJSONArray("results") ?: return@runCatching defaultIds
+        buildSet {
+            for (index in 0 until results.length()) {
+                val result = results.optJSONObject(index) ?: continue
+                if (result.optBoolean("ok", false)) {
+                    result.optionalString("clientMutationId")?.let(::add)
                 }
             }
         }

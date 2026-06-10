@@ -36,6 +36,7 @@ fun ArtistScreen(
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     onSelectAlbum: (LibraryAlbum) -> Unit,
     onSelectArtist: (LibraryArtist) -> Unit,
+    offlineNotice: String?,
     onAddTrackToPlaylist: ((Track) -> Unit)?,
     onAddTrackToQueue: (Track) -> Unit,
     onGoToTrackArtist: (Track) -> Unit,
@@ -61,6 +62,9 @@ fun ArtistScreen(
                     title = artist?.name ?: "Artist",
                     subtitle = "",
                 )
+            }
+            if (!offlineNotice.isNullOrBlank()) {
+                item { OfflineNotice(offlineNotice) }
             }
             if (artist == null) {
                 item { EmptyState("Artist was not found") }

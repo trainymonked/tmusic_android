@@ -131,8 +131,9 @@ fun DownloadCircleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    animateQueued: Boolean = true,
 ) {
-    val rotation = if (downloadState == DownloadState.Queued) {
+    val rotation = if (downloadState == DownloadState.Queued && animateQueued) {
         val transition = rememberInfiniteTransition(label = "download-spinner")
         transition.animateFloat(
             initialValue = 0f,

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +38,7 @@ internal fun PlaylistHeader(
     artworkBitmap: ImageBitmap?,
     coverKey: String,
     downloadState: DownloadState,
+    downloadProgressPercent: Int?,
     isFavorites: Boolean,
     canDownload: Boolean,
     hasPlayableTracks: Boolean,
@@ -135,11 +137,24 @@ internal fun PlaylistHeader(
                 )
             }
         }
-        DownloadCircleButton(
-            downloadState = downloadState,
-            contentDescription = "Download playlist",
-            onClick = onDownloadPlaylist,
-            enabled = canDownload,
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DownloadCircleButton(
+                downloadState = downloadState,
+                contentDescription = "Download playlist",
+                onClick = onDownloadPlaylist,
+                enabled = canDownload,
+                animateQueued = canDownload,
+            )
+            downloadProgressPercent?.let { percent ->
+                Text(
+                    text = "$percent%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }

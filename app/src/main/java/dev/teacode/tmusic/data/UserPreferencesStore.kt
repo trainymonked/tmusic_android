@@ -94,6 +94,65 @@ class UserPreferencesStore(context: Context) {
             .apply()
     }
 
+    fun lastPromptedUpdateVersion(): String? {
+        return preferences.getString(KEY_LAST_PROMPTED_UPDATE_VERSION, null)
+            ?.meaningfulStringOrNull()
+    }
+
+    fun setLastPromptedUpdateVersion(version: String) {
+        preferences.edit()
+            .putString(KEY_LAST_PROMPTED_UPDATE_VERSION, version)
+            .apply()
+    }
+
+    fun lastUpdateCheckEpochMs(): Long {
+        if (preferences.getString(KEY_UPDATE_CHECK_SOURCE, null) != UPDATE_CHECK_SOURCE_GITHUB_RELEASES) {
+            return 0L
+        }
+        return preferences.getLong(KEY_LAST_UPDATE_CHECK_EPOCH_MS, 0L).coerceAtLeast(0L)
+    }
+
+    fun setLastUpdateCheckEpochMs(epochMs: Long) {
+        preferences.edit()
+            .putString(KEY_UPDATE_CHECK_SOURCE, UPDATE_CHECK_SOURCE_GITHUB_RELEASES)
+            .putLong(KEY_LAST_UPDATE_CHECK_EPOCH_MS, epochMs.coerceAtLeast(0L))
+            .apply()
+    }
+
+    fun cachedAppUpdate(): AppUpdateInfo? {
+        val raw = preferences.getString(KEY_CACHED_APP_UPDATE, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return runCatching {
+            val json = JSONObject(raw)
+            AppUpdateInfo(
+                version = json.optString("version").meaningfulStringOrNull() ?: return null,
+                title = json.optString("title").meaningfulStringOrNull() ?: json.optString("version"),
+                changelog = json.optString("changelog"),
+                pageUrl = json.optString("pageUrl").meaningfulStringOrNull() ?: return null,
+                downloadUrl = json.optString("downloadUrl").meaningfulStringOrNull() ?: return null,
+            )
+        }.getOrNull()
+    }
+
+    fun setCachedAppUpdate(update: AppUpdateInfo) {
+        val json = JSONObject()
+            .put("version", update.version)
+            .put("title", update.title)
+            .put("changelog", update.changelog)
+            .put("pageUrl", update.pageUrl)
+            .put("downloadUrl", update.downloadUrl)
+        preferences.edit()
+            .putString(KEY_CACHED_APP_UPDATE, json.toString())
+            .apply()
+    }
+
+    fun clearCachedAppUpdate() {
+        preferences.edit()
+            .remove(KEY_CACHED_APP_UPDATE)
+            .apply()
+    }
+
     fun offlineAlbumIds(): Set<String> {
         return preferences.getStringSet(KEY_OFFLINE_ALBUM_IDS, emptySet()).orEmpty()
     }
@@ -241,6 +300,10 @@ class UserPreferencesStore(context: Context) {
         const val KEY_SHOW_LYRICS = "show_lyrics"
         const val KEY_DOWNLOAD_USING_CELLULAR = "download_using_cellular"
         const val KEY_CROSSFADE_SECONDS = "crossfade_seconds"
+        const val KEY_LAST_PROMPTED_UPDATE_VERSION = "last_prompted_update_version"
+        const val KEY_LAST_UPDATE_CHECK_EPOCH_MS = "last_update_check_epoch_ms"
+        const val KEY_UPDATE_CHECK_SOURCE = "update_check_source"
+        const val KEY_CACHED_APP_UPDATE = "cached_app_update"
         const val KEY_OFFLINE_ALBUM_IDS = "offline_album_ids"
         const val KEY_LASTFM_USERNAME = "lastfm_username"
         const val KEY_LASTFM_STATE = "lastfm_state"
@@ -249,6 +312,7 @@ class UserPreferencesStore(context: Context) {
         const val KEY_RECENT_LIBRARY_ITEMS = "recent_library_items"
         const val MAX_RECENT_SEARCHES = 8
         const val MAX_CROSSFADE_SECONDS = 12
+        const val UPDATE_CHECK_SOURCE_GITHUB_RELEASES = "github_releases"
     }
 }
 

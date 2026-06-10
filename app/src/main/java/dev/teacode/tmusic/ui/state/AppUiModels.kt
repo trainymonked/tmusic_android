@@ -33,8 +33,9 @@ internal enum class HomeRoute {
 
 internal const val SERVER_OFFLINE_FALLBACK_TIMEOUT_MS = 10_000L
 internal const val SERVER_SYNC_HARD_TIMEOUT_MS = 60_000L
+internal const val APP_UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
 internal const val ARTWORK_CACHE_LIMIT_BYTES = 128L * 1024L * 1024L
-internal const val PENDING_PLAY_EVENT_SYNC_BATCH_SIZE = 100
+internal const val PENDING_PLAY_EVENT_SYNC_BATCH_SIZE = 20
 internal const val HOME_ARTIST_PREVIEW_LIMIT = 12
 internal const val SCREEN_PAGE_LIMIT = 50
 internal const val DETAIL_TRACK_PAGE_LIMIT = 100

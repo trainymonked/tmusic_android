@@ -31,6 +31,37 @@ fun trackCountLabel(count: Int): String {
     return "$count ${if (count == 1) "track" else "tracks"}"
 }
 
+fun collectionStatsLabel(trackCount: Int, totalDurationSeconds: Int?): String {
+    val durationLabel = totalDurationSeconds
+        ?.takeIf { it > 0 }
+        ?.let(::durationMinutesLabel)
+    return listOfNotNull(trackCountLabel(trackCount), durationLabel).joinToString(" - ")
+}
+
+fun loadedTracksDurationSeconds(tracks: List<Track>, expectedTrackCount: Int): Int? {
+    return tracks
+        .takeIf { loadedTracks ->
+            loadedTracks.isNotEmpty() &&
+                (expectedTrackCount <= 0 || loadedTracks.size >= expectedTrackCount)
+        }
+        ?.sumOf { it.durationSeconds.coerceAtLeast(0) }
+        ?.takeIf { it > 0 }
+}
+
+private fun durationMinutesLabel(seconds: Int): String {
+    val minutes = ((seconds.coerceAtLeast(1) + 59) / 60).coerceAtLeast(1)
+    if (minutes < 60) {
+        return "$minutes min"
+    }
+    val hours = minutes / 60
+    val remainingMinutes = minutes % 60
+    return if (remainingMinutes == 0) {
+        "$hours h"
+    } else {
+        "$hours h $remainingMinutes min"
+    }
+}
+
 fun albumCountLabel(count: Int): String {
     return "$count ${if (count == 1) "album" else "albums"}"
 }

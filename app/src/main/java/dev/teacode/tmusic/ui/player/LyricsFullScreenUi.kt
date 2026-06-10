@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -32,6 +33,7 @@ internal fun LyricsFullScreen(
     plainLyrics: String,
     listState: LazyListState,
     onRefreshLyrics: (() -> Unit)?,
+    onSeek: (Int) -> Unit,
     onClose: () -> Unit,
 ) {
     Dialog(
@@ -57,6 +59,7 @@ internal fun LyricsFullScreen(
                     lines = syncedLines,
                     activeIndex = activeLyricIndex,
                     listState = listState,
+                    onSeek = onSeek,
                 )
                 plainLyrics.isBlank() -> NoLyricsState()
                 else -> PlainLyricsList(plainLyrics)
@@ -70,6 +73,7 @@ private fun ColumnScope.SyncedLyricsList(
     lines: List<SyncedLyricLine>,
     activeIndex: Int,
     listState: LazyListState,
+    onSeek: (Int) -> Unit,
 ) {
     LazyColumn(
         state = listState,
@@ -101,7 +105,9 @@ private fun ColumnScope.SyncedLyricsList(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSeek((line.timeMs / 1000L).toInt().coerceAtLeast(0)) },
             )
         }
     }

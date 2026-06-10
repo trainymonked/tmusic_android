@@ -48,7 +48,11 @@ class RemoteAuthRepository(
     }
 
     override suspend fun signOut() {
-        sessionStore.clear()
+        try {
+            apiClient.logout()
+        } finally {
+            sessionStore.clear()
+        }
     }
 
     override suspend fun currentAccount(): Account? {
@@ -306,11 +310,10 @@ class RemoteMusicRepository(
         return apiClient.createPlaylist(name)
     }
 
-    override suspend fun updatePlaylist(playlistId: String, name: String, description: String): Playlist? {
+    override suspend fun updatePlaylist(playlistId: String, name: String): Playlist? {
         return apiClient.updatePlaylist(
             playlistId = playlistId,
             name = name,
-            description = description,
         )
     }
 
@@ -359,6 +362,10 @@ class RemoteMusicRepository(
 
     suspend fun syncPlayEvents(events: List<PendingPlayEvent>): Set<String> {
         return apiClient.syncPlayEvents(events)
+    }
+
+    suspend fun syncLibraryMutations(mutations: List<PendingLibraryMutation>): Set<String> {
+        return apiClient.syncLibraryMutations(mutations)
     }
 
     override suspend fun lastFmAuthRequest(): LastFmAuthRequest {

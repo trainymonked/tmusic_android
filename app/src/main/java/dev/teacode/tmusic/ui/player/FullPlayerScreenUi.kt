@@ -164,6 +164,7 @@ fun FullPlayerScreen(
                 lyricsLoading = lyricsLoading,
                 progressSeconds = progressSeconds,
                 onRefreshLyrics = onRefreshLyrics,
+                onSeek = onSeek,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),

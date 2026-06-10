@@ -27,6 +27,7 @@ internal fun PlaylistPayload.mergeWithCachedPlaylistData(
     val loadedPlaylist = rawPlaylist.copy(
         isOfflineEnabled = rawPlaylist.isOfflineEnabled || currentPlaylist?.isOfflineEnabled == true,
         isFavorites = rawPlaylist.isFavorites || currentPlaylist?.isFavorites == true,
+        totalDurationSeconds = rawPlaylist.totalDurationSeconds ?: currentPlaylist?.totalDurationSeconds,
     )
     val mergedTracks = if (tracks.isEmpty()) {
         cachedTracks
@@ -53,15 +54,29 @@ internal fun PlaylistPayload.mergePlaylistTrackPage(
     append: Boolean,
 ): PlaylistPayload {
     val pagePlaylist = playlists.firstOrNull() ?: return this
-    val mergedPlaylist = if (append) {
-        pagePlaylist.copy(
+    val shouldKeepKnownOfflineTrackOrder = !append &&
+        currentPlaylist.isOfflineEnabled &&
+        currentPlaylist.trackIds.size > pagePlaylist.trackIds.size
+    val mergedPlaylist = when {
+        append -> pagePlaylist.copy(
             trackIds = currentPlaylist.trackIds + pagePlaylist.trackIds,
             playlistTrackIds = currentPlaylist.playlistTrackIds + pagePlaylist.playlistTrackIds,
             playlistTrackIdsByTrackId = currentPlaylist.playlistTrackIdsByTrackId + pagePlaylist.playlistTrackIdsByTrackId,
             trackCount = maxOf(currentPlaylist.trackCount, pagePlaylist.trackCount),
+            totalDurationSeconds = pagePlaylist.totalDurationSeconds ?: currentPlaylist.totalDurationSeconds,
         )
-    } else {
-        pagePlaylist
+
+        shouldKeepKnownOfflineTrackOrder -> pagePlaylist.copy(
+            trackIds = currentPlaylist.trackIds,
+            playlistTrackIds = currentPlaylist.playlistTrackIds,
+            playlistTrackIdsByTrackId = currentPlaylist.playlistTrackIdsByTrackId,
+            trackCount = maxOf(currentPlaylist.trackCount, pagePlaylist.trackCount, currentPlaylist.trackIds.size),
+            totalDurationSeconds = pagePlaylist.totalDurationSeconds ?: currentPlaylist.totalDurationSeconds,
+        )
+
+        else -> pagePlaylist.copy(
+            totalDurationSeconds = pagePlaylist.totalDurationSeconds ?: currentPlaylist.totalDurationSeconds,
+        )
     }
     return copy(playlists = listOf(mergedPlaylist.copy(id = playlist.id)))
 }

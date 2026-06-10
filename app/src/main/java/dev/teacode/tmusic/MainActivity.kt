@@ -10,6 +10,7 @@ import dev.teacode.tmusic.data.LastFmAuthTokenStore
 import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.OfflineLyricsStore
 import dev.teacode.tmusic.data.OfflineTrackStore
+import dev.teacode.tmusic.data.PendingLibraryMutationStore
 import dev.teacode.tmusic.data.PendingPlayEventStore
 import dev.teacode.tmusic.data.PlaybackStateStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
         val offlineLyricsStore = OfflineLyricsStore(applicationContext)
         val artworkCacheStore = ArtworkCacheStore(applicationContext)
         val playbackStateStore = PlaybackStateStore(applicationContext)
+        val pendingLibraryMutationStore = PendingLibraryMutationStore(applicationContext)
         val pendingPlayEventStore = PendingPlayEventStore(applicationContext)
         val lastFmAuthTokenStore = LastFmAuthTokenStore(applicationContext)
         val useLocalBackend = userPreferencesStore.useLocalBackend()
@@ -62,6 +64,7 @@ class MainActivity : ComponentActivity() {
                     offlineLyricsStore = offlineLyricsStore,
                     artworkCacheStore = artworkCacheStore,
                     playbackStateStore = playbackStateStore,
+                    pendingLibraryMutationStore = pendingLibraryMutationStore,
                     pendingPlayEventStore = pendingPlayEventStore,
                     lastFmAuthTokenStore = lastFmAuthTokenStore,
                 )

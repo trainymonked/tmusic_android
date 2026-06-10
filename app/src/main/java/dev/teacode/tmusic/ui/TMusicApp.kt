@@ -8,10 +8,32 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -22,8 +44,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.auth.GoogleSignInTokenProvider
 import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.DownloadState
@@ -32,16 +60,20 @@ import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.LibrarySearchResults
 import dev.teacode.tmusic.data.AppConfig
+import dev.teacode.tmusic.data.AppUpdateChecker
+import dev.teacode.tmusic.data.AppUpdateInfo
 import dev.teacode.tmusic.data.ArtworkCacheStore
 import dev.teacode.tmusic.data.LastFmAuthTokenStore
 import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.OfflineLyricsStore
+import dev.teacode.tmusic.data.PendingLibraryMutationStore
 import dev.teacode.tmusic.data.PendingPlayEventStore
 import dev.teacode.tmusic.data.PlaybackStateStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.TMusicApiException
 import dev.teacode.tmusic.data.UserPreferencesStore
+import dev.teacode.tmusic.data.isAppVersionNewer
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.domain.RecentLibraryItem
@@ -65,6 +97,9 @@ import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 import java.io.File
 import java.net.HttpURLConnection
+import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 @Composable
 fun TMusicApp(
@@ -76,6 +111,7 @@ fun TMusicApp(
     offlineLyricsStore: OfflineLyricsStore,
     artworkCacheStore: ArtworkCacheStore,
     playbackStateStore: PlaybackStateStore,
+    pendingLibraryMutationStore: PendingLibraryMutationStore,
     pendingPlayEventStore: PendingPlayEventStore,
     lastFmAuthTokenStore: LastFmAuthTokenStore,
 ) {
@@ -99,6 +135,7 @@ fun TMusicApp(
     }
     var exoPlayer by remember { mutableStateOf(primaryExoPlayer) }
     val standbyExoPlayer = if (exoPlayer === primaryExoPlayer) secondaryExoPlayer else primaryExoPlayer
+    val appUpdateChecker = remember { AppUpdateChecker() }
 
     LaunchedEffect(Unit) {
         if (
@@ -183,6 +220,8 @@ fun TMusicApp(
         )
     }
     var pendingPlayEventCount by remember { mutableStateOf(pendingPlayEventStore.count()) }
+    var pendingPlayEventSyncProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var pendingLibraryMutationCount by remember { mutableStateOf(pendingLibraryMutationStore.count()) }
     var pendingLastFmToken by remember { mutableStateOf(lastFmAuthTokenStore.token()) }
     var waitingForLastFmSession by remember { mutableStateOf(pendingLastFmToken != null) }
     var lastFmConnection by remember {
@@ -268,6 +307,18 @@ fun TMusicApp(
     var libraryLoadJob by remember { mutableStateOf<Job?>(null) }
     var libraryError by remember { mutableStateOf<String?>(null) }
     var libraryNotice by remember { mutableStateOf<String?>(null) }
+    val appUpdateController = remember {
+        AppUpdateController(
+            context = context,
+            userPreferencesStore = userPreferencesStore,
+            appUpdateChecker = appUpdateChecker,
+            currentVersion = BuildConfig.VERSION_NAME,
+            initialUpdate = userPreferencesStore.cachedAppUpdate()
+                ?.takeIf { update -> isAppVersionNewer(update.version, BuildConfig.VERSION_NAME) },
+            onNotice = { message -> libraryNotice = message },
+            onError = { message -> libraryError = message },
+        )
+    }
     var trackForPlaylistAdd by remember { mutableStateOf<Track?>(null) }
     var artistChoices by remember { mutableStateOf<List<LibraryArtist>>(emptyList()) }
     var playlistPickerPlaylists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
@@ -275,6 +326,7 @@ fun TMusicApp(
     var playlistMetadataLoaded by remember { mutableStateOf(false) }
     var duplicatePlaylistForAdd by remember { mutableStateOf<Playlist?>(null) }
     var playlistAddInProgress by remember { mutableStateOf(false) }
+    var libraryMutationSyncInProgress by remember { mutableStateOf(false) }
     var downloadedSizeBytes by remember { mutableStateOf(0L) }
     var cacheSizeBytes by remember { mutableStateOf(0L) }
     var queueInsertionAnchorTrackId by remember { mutableStateOf<String?>(null) }
@@ -300,6 +352,31 @@ fun TMusicApp(
             syncMode != SyncMode.Offline &&
             syncMode != SyncMode.OfflineOnly &&
             hasNetworkConnection()
+    }
+
+    fun canCheckAppUpdates(): Boolean {
+        return account != null &&
+            !offlineOnly &&
+            hasNetworkConnection()
+    }
+
+    val appUpdateDebugStatus = "account=${account != null} offlineOnly=$offlineOnly syncMode=$syncMode network=${hasNetworkConnection()}"
+    AppUpdateEffects(
+        controller = appUpdateController,
+        context = context,
+        accountId = account?.id,
+        offlineOnly = offlineOnly,
+        useLocalBackend = useLocalBackend,
+        canCheck = canCheckAppUpdates(),
+        debugStatus = appUpdateDebugStatus,
+    )
+
+    suspend fun checkForAppUpdate(manual: Boolean) {
+        appUpdateController.checkForUpdate(
+            manual = manual,
+            canCheck = canCheckAppUpdates(),
+            debugStatus = appUpdateDebugStatus,
+        )
     }
 
     fun canUseNetworkForCollectionDownloads(): Boolean {
@@ -452,7 +529,7 @@ fun TMusicApp(
     }
 
     fun syncPendingPlayEvents() {
-        if (!canUseServerRequests() || pendingPlayEventCount == 0) {
+        if (!canUseServerRequests() || pendingPlayEventCount == 0 || pendingPlayEventSyncProgress != null) {
             return
         }
 
@@ -460,6 +537,13 @@ fun TMusicApp(
             syncPendingPlayEventBatches(
                 store = pendingPlayEventStore,
                 musicRepository = musicRepository,
+                onProgress = { syncedCount, totalCount ->
+                    pendingPlayEventSyncProgress = if (totalCount > 0) {
+                        syncedCount to totalCount
+                    } else {
+                        null
+                    }
+                },
                 onBatchSynced = {
                     accessToken = authRepository.accessToken()
                     pendingPlayEventCount = pendingPlayEventStore.count()
@@ -470,6 +554,10 @@ fun TMusicApp(
                 markServerUnavailable(error)
                 libraryError = error.userMessage()
             }
+            pendingPlayEventCount = pendingPlayEventStore.count()
+            lastFmConnection = lastFmConnection.copy(pendingScrobbles = pendingPlayEventCount)
+            userPreferencesStore.setLastFmConnection(lastFmConnection)
+            pendingPlayEventSyncProgress = null
         }
     }
 
@@ -762,6 +850,7 @@ fun TMusicApp(
         libraryCacheStore.clear()
         playbackStateStore.clear()
         pendingPlayEventStore.clear()
+        pendingLibraryMutationStore.clear()
         account = null
         accessToken = null
         canContinueOffline = false
@@ -791,6 +880,8 @@ fun TMusicApp(
         clearGaplessPlaybackState()
         activePlayEventState.value = null
         pendingPlayEventCount = 0
+        pendingPlayEventSyncProgress = null
+        pendingLibraryMutationCount = 0
         pendingLastFmToken = null
         waitingForLastFmSession = false
         lastFmAuthTokenStore.clear()
@@ -956,6 +1047,57 @@ fun TMusicApp(
                 }
             }
         }
+    }
+
+    fun saveLibraryCache() {
+        libraryCacheStore.saveLibrary(
+            playlists = playlists,
+            tracks = tracks,
+            savedAlbums = savedAlbums,
+        )
+    }
+
+    fun enqueueLibraryMutation(type: String, payload: JSONObject) {
+        pendingLibraryMutationStore.append(type = type, payload = payload)
+        pendingLibraryMutationCount = pendingLibraryMutationStore.count()
+    }
+
+    fun syncPendingLibraryMutations() {
+        if (
+            libraryMutationSyncInProgress ||
+            pendingLibraryMutationCount <= 0 ||
+            !canUseServerRequests()
+        ) {
+            return
+        }
+        libraryMutationSyncInProgress = true
+        scope.launch {
+            runCatching {
+                val pendingMutations = pendingLibraryMutationStore.all()
+                musicRepository.syncLibraryMutations(pendingMutations)
+            }.onSuccess { syncedMutationIds ->
+                accessToken = authRepository.accessToken()
+                pendingLibraryMutationStore.removeSyncedPreservingDependencies(syncedMutationIds)
+                pendingLibraryMutationCount = pendingLibraryMutationStore.count()
+                if (syncedMutationIds.isNotEmpty()) {
+                    loadLibrary()
+                }
+            }.onFailure { error ->
+                markServerUnavailable(error)
+            }
+            libraryMutationSyncInProgress = false
+        }
+    }
+
+    fun favoritePlaylistForLocalMutation(): Playlist {
+        return playlists.firstOrNull { it.isFavoritesPlaylist() }
+            ?: Playlist(
+                id = "favorites",
+                title = "Favorites",
+                trackIds = emptyList(),
+                isOfflineEnabled = false,
+                isFavorites = true,
+            )
     }
 
     LaunchedEffect(searchQuery, syncMode, offlineOnly, tracks) {
@@ -1779,6 +1921,8 @@ fun TMusicApp(
         preferredIndex: Int? = null,
         allowResume: Boolean = false,
         newQueue: Boolean = false,
+        skippedQueueIndices: Set<Int> = emptySet(),
+        unavailableSkipDirection: Int = 1,
     ) {
         cancelCrossfade()
         if (newQueue) {
@@ -1794,6 +1938,33 @@ fun TMusicApp(
         val updatedQueue = preparedQueue.copy(
             currentIndex = currentIndex.takeIf { it >= 0 } ?: preparedQueue.currentIndex,
         )
+        fun canPlayWithoutServer(queuedTrack: Track): Boolean {
+            return localOrCachedPlaybackUrl(queuedTrack) != null
+        }
+        fun skipUnavailableTrack(message: String): Boolean {
+            if (!updatedQueue.canSkip || updatedQueue.tracks.size <= skippedQueueIndices.size + 1) {
+                return false
+            }
+            val unavailableIndex = updatedQueue.currentIndex.coerceIn(0, updatedQueue.tracks.lastIndex)
+            val skippedIndices = skippedQueueIndices + unavailableIndex
+            val skipDirection = if (unavailableSkipDirection < 0) -1 else 1
+            val nextIndex = (1 until updatedQueue.tracks.size)
+                .map { offset -> (unavailableIndex + offset * skipDirection).floorMod(updatedQueue.tracks.size) }
+                .firstOrNull { index ->
+                    index !in skippedIndices &&
+                        (canUseServerRequests() || canPlayWithoutServer(updatedQueue.tracks[index]))
+                }
+                ?: return false
+            libraryNotice = "$message Skipped unavailable track."
+            playQueuedTrack(
+                track = updatedQueue.tracks[nextIndex],
+                queue = updatedQueue.copy(currentIndex = nextIndex),
+                preferredIndex = nextIndex,
+                skippedQueueIndices = skippedIndices,
+                unavailableSkipDirection = unavailableSkipDirection,
+            )
+            return true
+        }
         val previousTrack = playerState.currentTrack
         val isDifferentQueueItem = previousTrack?.id != track.id ||
             playbackQueue.currentIndex != updatedQueue.currentIndex ||
@@ -1872,6 +2043,11 @@ fun TMusicApp(
         }
 
         if (!canUseServerRequests()) {
+            if (!canPlayWithoutServer(track) && updatedQueue.canSkip) {
+                if (skipUnavailableTrack("Track is not available offline.")) {
+                    return
+                }
+            }
             playerError = "Track is not available offline"
             playerState = PlayerState(
                 currentTrack = track,
@@ -1911,6 +2087,15 @@ fun TMusicApp(
             }.onFailure { error ->
                 if (streamRequestSerial == requestSerial && playerState.currentTrack?.id == track.id) {
                     markServerUnavailable(error)
+                    val canSkipServerUnavailable = error is TMusicApiException &&
+                        error.statusCode in setOf(
+                            HttpURLConnection.HTTP_FORBIDDEN,
+                            HttpURLConnection.HTTP_NOT_FOUND,
+                            HttpURLConnection.HTTP_GONE,
+                        )
+                    if (canSkipServerUnavailable && skipUnavailableTrack("Track is not available on the server.")) {
+                        return@onFailure
+                    }
                     playerError = error.userMessage()
                     playerState = playerState.copy(isPlaying = false)
                 }
@@ -1962,26 +2147,110 @@ fun TMusicApp(
         )
     }
 
+    suspend fun resolvePlaylistTracksForPlayback(
+        playlist: Playlist,
+        fallbackTracks: List<Track>,
+    ): List<Track> {
+        val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
+        val cachedTracks = currentPlaylist.tracksFrom(tracks)
+        val expectedTrackCount = currentPlaylist.trackCount.coerceAtLeast(currentPlaylist.trackIds.size)
+        if (
+            cachedTracks.isNotEmpty() &&
+            (expectedTrackCount <= 0 || cachedTracks.size >= expectedTrackCount || !canUseServerRequests())
+        ) {
+            return cachedTracks
+        }
+        if (!canUseServerRequests()) {
+            return cachedTracks.takeIf { it.isNotEmpty() } ?: fallbackTracks
+        }
+
+        val payload = if (playlist.isFavoritesPlaylist()) {
+            musicRepository.favoritesPlaylistPayload(currentPlaylist)
+        } else {
+            musicRepository.playlistPayload(playlist.id)
+        }
+        val merged = payload.mergeWithCachedPlaylistData(
+            cachedPlaylists = playlists,
+            cachedTracks = tracks,
+            withOfflineState = musicRepository::withOfflineState,
+        )
+        tracks = merged.tracks
+        playlists = merged.playlists
+        libraryCacheStore.saveLibrary(
+            playlists = merged.playlists,
+            tracks = merged.tracks,
+            savedAlbums = savedAlbums,
+        )
+        val loadedPlaylist = merged.playlist ?: currentPlaylist
+        return loadedPlaylist.tracksFrom(tracks).takeIf { it.isNotEmpty() } ?: fallbackTracks
+    }
+
+    fun selectedTrackIndexInResolvedTracks(
+        selectedTrack: Track,
+        selectedIndex: Int,
+        sourceTracks: List<Track>,
+        resolvedTracks: List<Track>,
+    ): Int {
+        val selectedOccurrence = sourceTracks
+            .take(selectedIndex + 1)
+            .count { it.id == selectedTrack.id }
+            .coerceAtLeast(1)
+        var occurrence = 0
+        resolvedTracks.forEachIndexed { index, track ->
+            if (track.id == selectedTrack.id) {
+                occurrence += 1
+                if (occurrence == selectedOccurrence) {
+                    return index
+                }
+            }
+        }
+        return resolvedTracks.indexOfFirst { it.id == selectedTrack.id }
+            .takeIf { it >= 0 }
+            ?: selectedIndex.coerceIn(resolvedTracks.indices)
+    }
+
     fun playPlaylistTrackAt(playlist: Playlist, playlistTracks: List<Track>, trackIndex: Int) {
         if (playlistTracks.isEmpty()) {
             return
         }
-        val startIndex = trackIndex.coerceIn(playlistTracks.indices)
-        val track = playlistTracks[startIndex]
+        val selectedIndex = trackIndex.coerceIn(playlistTracks.indices)
+        val selectedTrack = playlistTracks[selectedIndex]
 
-        playQueuedTrack(
-            track = track,
-            queue = PlaybackQueue(
-                playlistId = playlist.id,
-                sourceType = PlaybackSourceType.Playlist,
-                sourceId = playlist.id,
-                sourceTitle = playlist.title,
-                tracks = playlistTracks,
-                currentIndex = startIndex,
-            ),
-            preferredIndex = startIndex,
-            newQueue = true,
-        )
+        scope.launch {
+            runCatching {
+                resolvePlaylistTracksForPlayback(
+                    playlist = playlist,
+                    fallbackTracks = playlistTracks,
+                )
+            }.onSuccess { resolvedTracks ->
+                if (resolvedTracks.isEmpty()) {
+                    return@onSuccess
+                }
+                val startIndex = selectedTrackIndexInResolvedTracks(
+                    selectedTrack = selectedTrack,
+                    selectedIndex = selectedIndex,
+                    sourceTracks = playlistTracks,
+                    resolvedTracks = resolvedTracks,
+                )
+                val track = resolvedTracks[startIndex]
+                playQueuedTrack(
+                    track = track,
+                    queue = PlaybackQueue(
+                        playlistId = playlist.id,
+                        sourceType = PlaybackSourceType.Playlist,
+                        sourceId = playlist.id,
+                        sourceTitle = playlist.title,
+                        tracks = resolvedTracks,
+                        currentIndex = startIndex,
+                    ),
+                    preferredIndex = startIndex,
+                    newQueue = true,
+                )
+            }.onFailure { error ->
+                markServerUnavailable(error)
+                playerError = error.userMessage()
+            }
+        }
     }
 
     fun playPlaylist(playlist: Playlist, playlistTracks: List<Track>) {
@@ -1999,30 +2268,45 @@ fun TMusicApp(
         if (playlistTracks.isEmpty()) {
             return
         }
-        val randomizedTracks = playlistTracks.shuffled(Random).let { shuffledTracks ->
-            if (shuffledTracks.size > 1 && shuffledTracks.map(Track::id) == playbackQueue.tracks.map(Track::id)) {
-                shuffledTracks.drop(1) + shuffledTracks.first()
-            } else {
-                shuffledTracks
+        scope.launch {
+            runCatching {
+                resolvePlaylistTracksForPlayback(
+                    playlist = playlist,
+                    fallbackTracks = playlistTracks,
+                )
+            }.onSuccess { resolvedTracks ->
+                if (resolvedTracks.isEmpty()) {
+                    return@onSuccess
+                }
+                val randomizedTracks = resolvedTracks.shuffled(Random).let { shuffledTracks ->
+                    if (shuffledTracks.size > 1 && shuffledTracks.map(Track::id) == playbackQueue.tracks.map(Track::id)) {
+                        shuffledTracks.drop(1) + shuffledTracks.first()
+                    } else {
+                        shuffledTracks
+                    }
+                }
+                shuffleEnabled = true
+                userPreferencesStore.setShuffleEnabled(true)
+                playQueuedTrack(
+                    track = randomizedTracks.first(),
+                    queue = PlaybackQueue(
+                        playlistId = playlist.id,
+                        sourceType = PlaybackSourceType.Playlist,
+                        sourceId = playlist.id,
+                        sourceTitle = playlist.title,
+                        tracks = randomizedTracks,
+                        sourceTracks = resolvedTracks,
+                        isShuffled = true,
+                        currentIndex = 0,
+                    ),
+                    preferredIndex = 0,
+                    newQueue = true,
+                )
+            }.onFailure { error ->
+                markServerUnavailable(error)
+                playerError = error.userMessage()
             }
         }
-        shuffleEnabled = true
-        userPreferencesStore.setShuffleEnabled(true)
-        playQueuedTrack(
-            track = randomizedTracks.first(),
-            queue = PlaybackQueue(
-                playlistId = playlist.id,
-                sourceType = PlaybackSourceType.Playlist,
-                sourceId = playlist.id,
-                sourceTitle = playlist.title,
-                tracks = randomizedTracks,
-                sourceTracks = playlistTracks,
-                isShuffled = true,
-                currentIndex = 0,
-            ),
-            preferredIndex = 0,
-            newQueue = true,
-        )
     }
 
     fun mergeLoadedTracks(loadedTracks: List<Track>) {
@@ -2072,11 +2356,35 @@ fun TMusicApp(
         return applyPlaylistPayload(mergedPayload)
     }
 
+    fun playlistDownloadedTrackCount(playlist: Playlist): Int {
+        val downloadedTrackIds = tracks
+            .filter { it.downloadState == DownloadState.Downloaded }
+            .map { it.id }
+            .toSet()
+        return playlist.trackIds.count { trackId ->
+            trackId in downloadedTrackIds || musicRepository.localPlaybackUrl(trackId) != null
+        }
+    }
+
+    fun playlistIsFullyDownloaded(playlist: Playlist): Boolean {
+        if (!playlist.isOfflineEnabled) {
+            return false
+        }
+        val expectedTrackCount = playlist.trackCount.coerceAtLeast(playlist.trackIds.size)
+        return expectedTrackCount > 0 &&
+            playlist.trackIds.size >= expectedTrackCount &&
+            playlistDownloadedTrackCount(playlist) >= expectedTrackCount
+    }
+
     fun loadPlaylistTracks(playlist: Playlist, force: Boolean = false) {
         if (!canUseServerRequests() || playlist.id in playlistTrackLoadsInProgress) {
             return
         }
         val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
+        if (playlistIsFullyDownloaded(currentPlaylist)) {
+            playlistTrackHasMoreById = playlistTrackHasMoreById + (playlist.id to false)
+            return
+        }
         val offset = if (force) 0 else currentPlaylist.trackIds.size
         if (!force && currentPlaylist.trackIds.size >= currentPlaylist.trackCount) {
             val loadedTrackIds = tracks.map { it.id }.toSet()
@@ -2453,27 +2761,77 @@ fun TMusicApp(
         openAlbum(album)
     }
 
+    suspend fun resolveAlbumTracksForPlayback(
+        album: LibraryAlbum,
+        fallbackTracks: List<Track>,
+    ): List<Track> {
+        val cachedTracks = albumTracksById[album.id].orEmpty().takeIf { it.isNotEmpty() }
+            ?: tracks
+                .filter { track -> track.albumId == album.id || (track.album == album.title && track.matchesAlbumArtist(album)) }
+                .sortedBy { it.trackNumber ?: Int.MAX_VALUE }
+        if (
+            cachedTracks.isNotEmpty() &&
+            (!canUseServerRequests() || (album.trackCount > 0 && cachedTracks.size >= album.trackCount))
+        ) {
+            return cachedTracks
+        }
+        if (!canUseServerRequests()) {
+            return cachedTracks.takeIf { it.isNotEmpty() } ?: fallbackTracks
+        }
+
+        val loadedTracks = musicRepository.albumTracks(album.id)
+            .sortedBy { it.trackNumber ?: Int.MAX_VALUE }
+        albumTracksById = albumTracksById + (album.id to loadedTracks)
+        mergeLoadedTracks(loadedTracks)
+        return loadedTracks.takeIf { it.isNotEmpty() } ?: fallbackTracks
+    }
+
     fun playAlbumFromTrack(album: LibraryAlbum, albumTracks: List<Track>, track: Track) {
         if (albumTracks.isEmpty()) {
             return
         }
-        val startIndex = albumTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+        val selectedIndex = albumTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
 
-        playQueuedTrack(
-            track = track,
-            queue = PlaybackQueue(
-                sourceType = PlaybackSourceType.Album,
-                sourceId = album.id,
-                sourceTitle = album.title,
-                tracks = albumTracks,
-                currentIndex = startIndex,
-            ),
-            preferredIndex = startIndex,
-            newQueue = true,
-        )
+        scope.launch {
+            runCatching {
+                resolveAlbumTracksForPlayback(
+                    album = album,
+                    fallbackTracks = albumTracks,
+                )
+            }.onSuccess { resolvedTracks ->
+                if (resolvedTracks.isEmpty()) {
+                    return@onSuccess
+                }
+                val startIndex = selectedTrackIndexInResolvedTracks(
+                    selectedTrack = track,
+                    selectedIndex = selectedIndex,
+                    sourceTracks = albumTracks,
+                    resolvedTracks = resolvedTracks,
+                )
+                playQueuedTrack(
+                    track = resolvedTracks[startIndex],
+                    queue = PlaybackQueue(
+                        sourceType = PlaybackSourceType.Album,
+                        sourceId = album.id,
+                        sourceTitle = album.title,
+                        tracks = resolvedTracks,
+                        currentIndex = startIndex,
+                    ),
+                    preferredIndex = startIndex,
+                    newQueue = true,
+                )
+            }.onFailure { error ->
+                markServerUnavailable(error)
+                playerError = error.userMessage()
+            }
+        }
     }
 
     fun playAlbum(album: LibraryAlbum, albumTracks: List<Track>) {
+        if (shuffleEnabled) {
+            shuffleEnabled = false
+            userPreferencesStore.setShuffleEnabled(false)
+        }
         val firstTrack = albumTracks.firstOrNull()
         if (firstTrack != null) {
             playAlbumFromTrack(album, albumTracks, firstTrack)
@@ -2487,13 +2845,10 @@ fun TMusicApp(
 
         scope.launch {
             runCatching {
-                musicRepository.albumTracks(album.id)
-            }.onSuccess { loadedTracks ->
-                val orderedTracks = loadedTracks.sortedBy { it.trackNumber ?: Int.MAX_VALUE }
-                albumTracksById = albumTracksById + (album.id to orderedTracks)
-                mergeLoadedTracks(orderedTracks)
-                orderedTracks.firstOrNull()?.let { track ->
-                    playAlbumFromTrack(album, orderedTracks, track)
+                resolveAlbumTracksForPlayback(album, emptyList())
+            }.onSuccess { resolvedTracks ->
+                resolvedTracks.firstOrNull()?.let { track ->
+                    playAlbumFromTrack(album, resolvedTracks, track)
                 }
             }.onFailure { error ->
                 markServerUnavailable(error)
@@ -2504,7 +2859,30 @@ fun TMusicApp(
 
     fun toggleAlbumInLibrary(album: LibraryAlbum) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before saving albums to Library."
+            val nextSavedState = !album.savedByCurrentUser
+            val updatedAlbum = album.copy(
+                savedByCurrentUser = nextSavedState,
+                isOfflineEnabled = album.isOfflineEnabled || album.id in offlineAlbumIds,
+            )
+            albums = albums.updateOrAppendAlbum(updatedAlbum)
+            albumsByArtist = albumsByArtist.mapValues { (_, artistAlbums) ->
+                artistAlbums.updateOrAppendAlbum(updatedAlbum)
+            }
+            appearsOnByArtist = appearsOnByArtist.mapValues { (_, artistAlbums) ->
+                artistAlbums.updateOrAppendAlbum(updatedAlbum)
+            }
+            savedAlbums = if (nextSavedState) {
+                savedAlbums.updateOrAppendAlbum(updatedAlbum).sortedAlbumsForDisplay()
+            } else {
+                savedAlbums.filterNot { it.id == album.id }
+            }
+            enqueueLibraryMutation(
+                type = "album.save.set",
+                payload = JSONObject()
+                    .put("albumId", album.id)
+                    .put("saved", nextSavedState),
+            )
+            saveLibraryCache()
             return
         }
 
@@ -2557,10 +2935,23 @@ fun TMusicApp(
             return
         }
 
+        val indexFromQueue = queue.currentIndex
+            .takeIf { it in queue.tracks.indices && queue.tracks[it].id == currentTrackId }
+        val indexFromTrack = currentTrackId
+            ?.let { trackId -> queue.tracks.indexOfFirst { it.id == trackId } }
+            ?.takeIf { it in queue.tracks.indices }
+        val currentIndex = indexFromQueue
+            ?: indexFromTrack
+            ?: queue.currentIndex.coerceIn(0, queue.tracks.lastIndex)
+
         if (direction < 0) {
             val currentPositionMs = runCatching { exoPlayer.currentPosition }
                 .getOrDefault(playerState.progressSeconds.toLong() * 1000L)
-            if (currentPositionMs >= 2_000L) {
+            val previousIndex = (currentIndex - 1).floorMod(queue.tracks.size)
+            val previousTrack = queue.tracks.getOrNull(previousIndex)
+            val shouldRestartCurrent = currentPositionMs >= 2_000L &&
+                (canUseServerRequests() || previousTrack?.let(::localOrCachedPlaybackUrl) != null)
+            if (shouldRestartCurrent) {
                 val currentTrack = playerState.currentTrack ?: return
                 completeActivePlayEvent(force = true)
                 playerState = playerState.copy(progressSeconds = 0)
@@ -2575,14 +2966,6 @@ fun TMusicApp(
             }
         }
 
-        val indexFromQueue = queue.currentIndex
-            .takeIf { it in queue.tracks.indices && queue.tracks[it].id == currentTrackId }
-        val indexFromTrack = currentTrackId
-            ?.let { trackId -> queue.tracks.indexOfFirst { it.id == trackId } }
-            ?.takeIf { it in queue.tracks.indices }
-        val currentIndex = indexFromQueue
-            ?: indexFromTrack
-            ?: queue.currentIndex.coerceIn(0, queue.tracks.lastIndex)
         val requestedIndex = currentIndex + direction
         val nextIndex = requestedIndex.floorMod(queue.tracks.size)
         artworkTransitionDirection = if (direction < 0) -1 else 1
@@ -2593,6 +2976,7 @@ fun TMusicApp(
             track = queue.tracks[nextIndex],
             queue = queue.copy(currentIndex = nextIndex),
             preferredIndex = nextIndex,
+            unavailableSkipDirection = direction,
         )
     }
 
@@ -2667,16 +3051,20 @@ fun TMusicApp(
         val nextTracks = queue.tracks.toMutableList().apply {
             add(insertionIndex, track)
         }
+        val nextManualFlags = queue.normalizedManualQueueFlags().toMutableList().apply {
+            add(insertionIndex, true)
+        }
         clearGaplessPlaybackState()
         playbackQueue = queue.copy(
             tracks = nextTracks,
-            sourceTracks = nextTracks,
+            sourceTracks = queue.naturalTracks(),
+            manualQueueFlags = nextManualFlags,
             currentIndex = when {
                 queue.currentIndex < 0 -> 0
                 insertionIndex <= queue.currentIndex -> queue.currentIndex + 1
                 else -> queue.currentIndex
             },
-            isShuffled = false,
+            isShuffled = queue.isShuffled,
         )
         queueInsertionAnchorTrackId = currentTrack?.id
         queueInsertionCursor = insertionIndex
@@ -2691,7 +3079,23 @@ fun TMusicApp(
         if (index !in queue.tracks.indices) {
             return
         }
+        val removedTrack = queue.tracks[index]
+        val removedManual = queue.isManualQueueItem(index)
+        fun List<Track>.withoutFirstTrackId(trackId: String): List<Track> {
+            val removeIndex = indexOfFirst { it.id == trackId }
+            if (removeIndex < 0) {
+                return this
+            }
+            return filterIndexed { itemIndex, _ -> itemIndex != removeIndex }
+        }
         val nextTracks = queue.tracks.filterIndexed { itemIndex, _ -> itemIndex != index }
+        val nextManualFlags = queue.normalizedManualQueueFlags()
+            .filterIndexed { itemIndex, _ -> itemIndex != index }
+        val nextSourceTracks = if (removedManual) {
+            queue.naturalTracks()
+        } else {
+            queue.naturalTracks().withoutFirstTrackId(removedTrack.id)
+        }
         if (nextTracks.isEmpty()) {
             clearNowPlayingEvent(activePlayEventState.value)
             activePlayEventState.value = null
@@ -2710,9 +3114,10 @@ fun TMusicApp(
         }
         val nextQueue = queue.copy(
             tracks = nextTracks,
-            sourceTracks = nextTracks,
+            sourceTracks = nextSourceTracks,
+            manualQueueFlags = nextManualFlags,
             currentIndex = nextCurrentIndex,
-            isShuffled = false,
+            isShuffled = queue.isShuffled,
         )
         clearGaplessPlaybackState()
         playbackQueue = nextQueue
@@ -2744,6 +3149,8 @@ fun TMusicApp(
             return
         }
         val reorderedTracks = reorderedIndices.map(queue.tracks::get)
+        val manualFlags = queue.normalizedManualQueueFlags()
+        val reorderedManualFlags = reorderedIndices.map(manualFlags::get)
         val currentTrackId = playerState.currentTrack?.id
         val activeOriginalIndex = queue.currentIndex
             .takeIf { it in queue.tracks.indices && queue.tracks[it].id == currentTrackId }
@@ -2756,35 +3163,101 @@ fun TMusicApp(
             ?: queue.currentIndex.coerceIn(0, reorderedTracks.lastIndex)
         val nextQueue = playbackQueue.copy(
             tracks = reorderedTracks,
-            sourceTracks = reorderedTracks,
+            sourceTracks = reorderedTracks.filterIndexed { index, _ -> !reorderedManualFlags[index] },
+            manualQueueFlags = reorderedManualFlags,
             currentIndex = nextIndex,
-            isShuffled = false,
+            isShuffled = queue.isShuffled,
         )
         queueInsertionCursor = null
         clearGaplessPlaybackState()
         playbackQueue = nextQueue
     }
 
-    fun openTrackArtist(track: Track) {
-        val artistOptions = (track.artistReferences() + track.artistLogicNames().mapNotNull(::resolveCachedArtist))
+    fun artistOptionsForTrack(track: Track): List<LibraryArtist> {
+        return (track.artistReferences() + track.artistLogicNames().mapNotNull(::resolveCachedArtist))
             .distinctBy { it.id }
+    }
+
+    fun artistOptionsForAlbum(album: LibraryAlbum): List<LibraryArtist> {
+        return (
+            album.artistReferences(albumTracksById[album.id].orEmpty() + tracks) +
+                album.artistLogicNames().mapNotNull(::resolveCachedArtist)
+            )
+            .distinctBy { it.id }
+    }
+
+    fun openArtistOptions(
+        artistOptions: List<LibraryArtist>,
+        missingMessage: String,
+    ) {
         when (artistOptions.size) {
-            0 -> libraryError = "Artist id is missing for this track."
+            0 -> libraryError = missingMessage
             1 -> openArtist(artistOptions.first())
             else -> artistChoices = artistOptions
         }
     }
 
+    fun openTrackArtist(track: Track) {
+        val artistOptions = artistOptionsForTrack(track)
+        val albumId = track.albumId?.takeIf { it.isNotBlank() }
+        if (artistOptions.isNotEmpty() || !canUseServerRequests() || albumId == null) {
+            openArtistOptions(artistOptions, missingMessage = "Artist id is missing for this track.")
+            return
+        }
+        scope.launch {
+            runCatching {
+                musicRepository.albumTracksPage(
+                    albumId = albumId,
+                    limit = DETAIL_TRACK_PAGE_LIMIT,
+                    offset = 0,
+                )
+            }.onSuccess { loadedTracks ->
+                accessToken = authRepository.accessToken()
+                mergeLoadedTracks(loadedTracks)
+                albumTracksById = albumTracksById + (
+                    albumId to (albumTracksById[albumId].orEmpty() + loadedTracks)
+                        .distinctBy { it.id }
+                )
+                val resolvedTrack = loadedTracks.firstOrNull { it.id == track.id } ?: track
+                openArtistOptions(
+                    artistOptionsForTrack(resolvedTrack),
+                    missingMessage = "Artist id is missing for this track.",
+                )
+            }.onFailure { error ->
+                markServerUnavailable(error)
+                libraryError = error.userMessage()
+            }
+        }
+    }
+
     fun openAlbumArtist(album: LibraryAlbum) {
-        val artistOptions = (
-            album.artistReferences(albumTracksById[album.id].orEmpty() + tracks) +
-                album.artistLogicNames().mapNotNull(::resolveCachedArtist)
-            )
-            .distinctBy { it.id }
-        when (artistOptions.size) {
-            0 -> libraryError = "Artist id is missing for this album."
-            1 -> openArtist(artistOptions.first())
-            else -> artistChoices = artistOptions
+        val artistOptions = artistOptionsForAlbum(album)
+        if (artistOptions.isNotEmpty() || !canUseServerRequests()) {
+            openArtistOptions(artistOptions, missingMessage = "Artist id is missing for this album.")
+            return
+        }
+        scope.launch {
+            runCatching {
+                musicRepository.albumTracksPage(
+                    albumId = album.id,
+                    limit = DETAIL_TRACK_PAGE_LIMIT,
+                    offset = 0,
+                )
+            }.onSuccess { loadedTracks ->
+                accessToken = authRepository.accessToken()
+                mergeLoadedTracks(loadedTracks)
+                albumTracksById = albumTracksById + (
+                    album.id to (albumTracksById[album.id].orEmpty() + loadedTracks)
+                        .distinctBy { it.id }
+                )
+                openArtistOptions(
+                    artistOptionsForAlbum(album),
+                    missingMessage = "Artist id is missing for this album.",
+                )
+            }.onFailure { error ->
+                markServerUnavailable(error)
+                libraryError = error.userMessage()
+            }
         }
     }
 
@@ -2968,7 +3441,27 @@ fun TMusicApp(
 
     fun toggleFavoriteTrack(track: Track) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing Favorites."
+            val favoritePlaylist = favoritePlaylistForLocalMutation()
+            val wasFavorite = track.isLiked ?: (track.id in favoritePlaylist.trackIds)
+            val nextPlaylist = if (wasFavorite) {
+                favoritePlaylist.withoutFavoriteTrack(track.id)
+            } else {
+                favoritePlaylist.withFavoriteTrack(track.id)
+            }
+            playlists = playlists
+                .sanitizeClientPlaylists()
+                .updateOrAppendPlaylist(nextPlaylist)
+            updateKnownTrackLikedState(track.id, isLiked = !wasFavorite)
+            if (tracks.none { it.id == track.id }) {
+                tracks = tracks + track.copy(isLiked = !wasFavorite)
+            }
+            enqueueLibraryMutation(
+                type = "favorite.set",
+                payload = JSONObject()
+                    .put("trackId", track.id)
+                    .put("liked", !wasFavorite),
+            )
+            saveLibraryCache()
             return
         }
         if (playlistAddInProgress) {
@@ -3060,8 +3553,15 @@ fun TMusicApp(
         }
     }
 
-    val currentTrackFavorite = playerState.currentTrack?.id?.let { trackId ->
-        playlists.firstOrNull { it.isFavoritesPlaylist() }?.trackIds?.contains(trackId) == true
+    val currentTrackFavorite = playerState.currentTrack?.let { currentTrack ->
+        currentTrack.isLiked
+            ?: tracks.firstOrNull { it.id == currentTrack.id }?.isLiked
+            ?: recentTracks.firstOrNull { it.id == currentTrack.id }?.isLiked
+            ?: searchResults.tracks.firstOrNull { it.id == currentTrack.id }?.isLiked
+            ?: albumTracksById.values.asSequence().flatten().firstOrNull { it.id == currentTrack.id }?.isLiked
+            ?: looseTracksByArtist.values.asSequence().flatten().firstOrNull { it.id == currentTrack.id }?.isLiked
+            ?: playbackQueue.tracks.firstOrNull { it.id == currentTrack.id }?.isLiked
+            ?: playlists.firstOrNull { it.isFavoritesPlaylist() }?.trackIds?.contains(currentTrack.id)
     } == true
 
     PlaybackSystemIntegration(
@@ -3136,7 +3636,8 @@ fun TMusicApp(
 
     fun loadPlaylistPickerPlaylists(force: Boolean = false) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
+            playlistPickerPlaylists = playlists.sanitizeClientPlaylists().filterNot { it.isFavoritesPlaylist() }
+            playlistMetadataLoaded = true
             return
         }
         if (playlistPickerLoading || (!force && playlistMetadataLoaded)) {
@@ -3159,21 +3660,28 @@ fun TMusicApp(
     }
 
     fun openAddTrackToPlaylist(track: Track) {
-        if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
-            return
-        }
         trackForPlaylistAdd = track
         duplicatePlaylistForAdd = null
         playlistPickerPlaylists = playlists.sanitizeClientPlaylists().filterNot { it.isFavoritesPlaylist() }.map { playlist ->
             playlist.copy(trackIds = emptyList(), playlistTrackIds = emptyList(), playlistTrackIdsByTrackId = emptyMap())
         }
-        loadPlaylistPickerPlaylists(force = true)
+        if (canUseServerRequests()) {
+            loadPlaylistPickerPlaylists(force = true)
+        } else {
+            playlistMetadataLoaded = true
+        }
     }
 
     LaunchedEffect(account?.id, offlineOnly, syncMode) {
         if (canUseServerRequests()) {
             loadPlaylistPickerPlaylists(force = false)
+            syncPendingLibraryMutations()
+        }
+    }
+
+    LaunchedEffect(account?.id, offlineOnly, syncMode, pendingLibraryMutationCount) {
+        if (canUseServerRequests()) {
+            syncPendingLibraryMutations()
         }
     }
 
@@ -3217,7 +3725,22 @@ fun TMusicApp(
             return
         }
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before creating playlists."
+            val localPlaylistId = "local-playlist:${UUID.randomUUID()}"
+            val localPlaylist = Playlist(
+                id = localPlaylistId,
+                title = trimmedName,
+                trackIds = emptyList(),
+                isOfflineEnabled = false,
+            )
+            playlists = playlists.updateOrAppendPlaylist(localPlaylist)
+            playlistPickerPlaylists = playlistPickerPlaylists.updateOrAppendPlaylist(localPlaylist)
+            enqueueLibraryMutation(
+                type = "playlist.create",
+                payload = JSONObject()
+                    .put("clientPlaylistId", localPlaylistId)
+                    .put("name", trimmedName),
+            )
+            saveLibraryCache()
             return
         }
 
@@ -3235,14 +3758,25 @@ fun TMusicApp(
         }
     }
 
-    fun updatePlaylistDetails(playlist: Playlist, name: String, description: String) {
+    fun updatePlaylistDetails(playlist: Playlist, name: String) {
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) {
             libraryError = "Playlist name is required."
             return
         }
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
+            val updatedPlaylist = playlist.copy(
+                title = trimmedName,
+            )
+            playlists = playlists.updatePlaylist(updatedPlaylist)
+            playlistPickerPlaylists = playlistPickerPlaylists.updatePlaylist(updatedPlaylist)
+            enqueueLibraryMutation(
+                type = "playlist.update",
+                payload = JSONObject()
+                    .put("playlistId", playlist.id)
+                    .put("name", trimmedName),
+            )
+            saveLibraryCache()
             return
         }
 
@@ -3252,7 +3786,6 @@ fun TMusicApp(
                 musicRepository.updatePlaylist(
                     playlistId = playlist.id,
                     name = trimmedName,
-                    description = description,
                 )
             }.onSuccess { updatedPlaylist ->
                 accessToken = authRepository.accessToken()
@@ -3289,7 +3822,31 @@ fun TMusicApp(
 
     fun addTrackToPlaylist(playlist: Playlist, track: Track) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
+            val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
+            val localPlaylistTrackId = "local-playlist-track:${UUID.randomUUID()}"
+            val updatedPlaylist = currentPlaylist.copy(
+                trackIds = currentPlaylist.trackIds + track.id,
+                playlistTrackIds = currentPlaylist.playlistTrackIds + localPlaylistTrackId,
+                playlistTrackIdsByTrackId = currentPlaylist.playlistTrackIdsByTrackId + (track.id to localPlaylistTrackId),
+                trackCount = maxOf(currentPlaylist.trackCount + 1, currentPlaylist.trackIds.size + 1),
+            )
+            playlists = playlists.updateOrAppendPlaylist(updatedPlaylist)
+            playlistPickerPlaylists = playlistPickerPlaylists.updateOrAppendPlaylist(
+                updatedPlaylist.copy(trackIds = emptyList(), playlistTrackIds = emptyList(), playlistTrackIdsByTrackId = emptyMap()),
+            )
+            if (tracks.none { existingTrack -> existingTrack.id == track.id }) {
+                tracks = tracks + track
+            }
+            enqueueLibraryMutation(
+                type = "playlist.track.add",
+                payload = JSONObject()
+                    .put("playlistId", playlist.id)
+                    .put("trackId", track.id)
+                    .put("clientPlaylistTrackId", localPlaylistTrackId),
+            )
+            saveLibraryCache()
+            trackForPlaylistAdd = null
+            duplicatePlaylistForAdd = null
             return
         }
         if (playlistAddInProgress) {
@@ -3378,7 +3935,16 @@ fun TMusicApp(
             return
         }
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before deleting playlists."
+            playlists = playlists.filterNot { it.id == playlist.id }
+            playlistPickerPlaylists = playlistPickerPlaylists.filterNot { it.id == playlist.id }
+            enqueueLibraryMutation(
+                type = "playlist.delete",
+                payload = JSONObject().put("playlistId", playlist.id),
+            )
+            saveLibraryCache()
+            if (destination.playlistId == playlist.id) {
+                navigateTo(AppDestination(tab = AppTab.Library))
+            }
             return
         }
 
@@ -3407,7 +3973,12 @@ fun TMusicApp(
 
     fun requestAddTrackToPlaylist(playlist: Playlist, track: Track, allowDuplicate: Boolean = false) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
+            val checkedPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
+            if (!allowDuplicate && track.id in checkedPlaylist.trackIds) {
+                duplicatePlaylistForAdd = checkedPlaylist
+            } else {
+                addTrackToPlaylist(checkedPlaylist, track)
+            }
             return
         }
         if (allowDuplicate) {
@@ -3441,7 +4012,22 @@ fun TMusicApp(
 
     fun removeTrackFromPlaylist(playlist: Playlist, playlistTrackId: String) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
+            val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
+            val removedIndex = currentPlaylist.playlistTrackIds.indexOf(playlistTrackId)
+            val removedTrackId = currentPlaylist.trackIds.getOrNull(removedIndex)
+                ?: currentPlaylist.playlistTrackIdsByTrackId.entries
+                    .firstOrNull { it.value == playlistTrackId }
+                    ?.key
+            val updatedPlaylist = currentPlaylist.withoutPlaylistTrackId(playlistTrackId)
+            playlists = playlists.updatePlaylist(updatedPlaylist)
+            enqueueLibraryMutation(
+                type = "playlist.track.remove",
+                payload = JSONObject()
+                    .put("playlistId", playlist.id)
+                    .put("playlistTrackId", playlistTrackId)
+                    .put("trackId", removedTrackId),
+            )
+            saveLibraryCache()
             return
         }
         val removedIndex = playlist.playlistTrackIds.indexOf(playlistTrackId)
@@ -3512,7 +4098,31 @@ fun TMusicApp(
 
     fun reorderPlaylistTracks(playlist: Playlist, playlistTrackIds: List<String>) {
         if (!canUseServerRequests()) {
-            libraryError = "Connect to the server before editing playlists."
+            val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
+            val trackIdsByPlaylistTrackId = currentPlaylist.playlistTrackIds
+                .zip(currentPlaylist.trackIds)
+                .toMap()
+            val reorderedTrackIds = playlistTrackIds.mapNotNull(trackIdsByPlaylistTrackId::get)
+            if (
+                playlistTrackIds.isEmpty() ||
+                playlistTrackIds.size != playlistTrackIds.distinct().size ||
+                reorderedTrackIds.size != playlistTrackIds.size
+            ) {
+                libraryError = "Could not reorder this playlist."
+                return
+            }
+            val updatedPlaylist = currentPlaylist.copy(
+                trackIds = reorderedTrackIds,
+                playlistTrackIds = playlistTrackIds,
+            )
+            playlists = playlists.updatePlaylist(updatedPlaylist)
+            enqueueLibraryMutation(
+                type = "playlist.tracks.reorder",
+                payload = JSONObject()
+                    .put("playlistId", playlist.id)
+                    .put("playlistTrackIds", JSONArray(playlistTrackIds)),
+            )
+            saveLibraryCache()
             return
         }
         if (playlistTrackIds.isEmpty() || playlistTrackIds.size != playlistTrackIds.distinct().size) {
@@ -3688,9 +4298,6 @@ fun TMusicApp(
         val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
         val optimisticPlaylist = currentPlaylist.copy(isOfflineEnabled = true)
         playlists = playlists.updateOrAppendPlaylist(optimisticPlaylist)
-        currentPlaylist.tracksFrom(tracks)
-            .filter { it.downloadState != DownloadState.Downloaded }
-            .forEach { track -> updateTrackDownloadState(track.id, DownloadState.Queued) }
         libraryCacheStore.saveLibrary(
             playlists = playlists,
             tracks = tracks,
@@ -3892,6 +4499,9 @@ fun TMusicApp(
             .filter { playlist -> playlist.isOfflineEnabled }
             .forEach { playlist ->
                 if (playlistDownloadJobs[playlist.id]?.isActive == true) {
+                    return@forEach
+                }
+                if (playlistIsFullyDownloaded(playlist)) {
                     return@forEach
                 }
                 val playlistTracks = playlist.tracksFrom(tracks)
@@ -4262,6 +4872,11 @@ fun TMusicApp(
             if (account != null && !offlineOnly && libraryLoadJob == null) {
                 loadLibrary()
             }
+            if (account != null && !offlineOnly) {
+                scope.launch {
+                    checkForAppUpdate(manual = false)
+                }
+            }
         },
     )
 
@@ -4396,6 +5011,7 @@ fun TMusicApp(
                     activePlaylistId = playbackQueue.playlistId,
                     activeAlbumId = playbackQueue.sourceId.takeIf { playbackQueue.sourceType == PlaybackSourceType.Album },
                     queueTracks = playbackQueue.tracks,
+                    manualQueueFlags = playbackQueue.normalizedManualQueueFlags(),
                     queueCurrentIndex = playbackQueue.currentIndex,
                     playbackQueueGeneration = playbackQueueGeneration,
                     artworkTransitionDirection = artworkTransitionDirection,
@@ -4420,6 +5036,7 @@ fun TMusicApp(
                     syncMode = syncMode,
                     lastFmConnection = lastFmConnection,
                     pendingPlayEventCount = pendingPlayEventCount,
+                    pendingPlayEventSyncProgress = pendingPlayEventSyncProgress,
                     waitingForLastFmSession = waitingForLastFmSession,
                     scrobblingPaused = scrobblingPaused,
                     showLyricsSetting = showLyrics,
@@ -4429,6 +5046,8 @@ fun TMusicApp(
                     downloadUsingCellular = downloadUsingCellular,
                     downloadedSizeBytes = downloadedSizeBytes,
                     cacheSizeBytes = cacheSizeBytes,
+                    appUpdateController = appUpdateController,
+                    appVersionName = BuildConfig.VERSION_NAME,
                     onRetry = { loadLibrary(destination) },
                     onRefreshHome = { loadLibrary(destination) },
                     onRefreshLibrary = { loadLibrary(destination) },
@@ -4475,6 +5094,11 @@ fun TMusicApp(
                     onSyncLastFmUpdates = ::syncPendingPlayEvents,
                     onClearDownloads = ::clearDownloads,
                     onClearCache = ::clearAppCache,
+                    onCheckUpdates = {
+                        scope.launch {
+                            checkForAppUpdate(manual = true)
+                        }
+                    },
                     onSelectTab = { tab ->
                         val nextDestination = AppDestination(tab = tab)
                         if (destination == nextDestination) {
@@ -4580,6 +5204,7 @@ fun TMusicApp(
                     },
                 )
             }
+            AppUpdateDialogHost(appUpdateController)
             trackForPlaylistAdd?.let { track ->
                 AddTrackToPlaylistDialog(
                     track = track,
@@ -4607,4 +5232,216 @@ fun TMusicApp(
             }
         }
     }
+}
+
+@Composable
+internal fun UpdateAvailableDialog(
+    update: AppUpdateInfo,
+    status: String?,
+    actionLabel: String,
+    actionEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onUpdate: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.90f)
+                .heightIn(min = 520.dp, max = 720.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "Update available",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = update.title.ifBlank { update.version },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (!status.isNullOrBlank()) {
+                        Text(
+                            text = status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                UpdateReleaseNotes(
+                    update = update,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(start = 20.dp, top = 14.dp, end = 14.dp, bottom = 10.dp),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 7.dp),
+                    ) {
+                        Text("Later")
+                    }
+                    Button(
+                        onClick = onUpdate,
+                        enabled = actionEnabled,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 7.dp),
+                    ) {
+                        Text(actionLabel)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateReleaseNotes(
+    update: AppUpdateInfo,
+    modifier: Modifier = Modifier,
+) {
+    val releaseNotes = remember(update.changelog) {
+        update.changelog.markdownReleaseNoteLines()
+    }
+    val scrollState = rememberScrollState()
+    Row(
+        modifier = modifier.fillMaxHeight(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (releaseNotes.isEmpty()) {
+                Text(
+                    text = "No release notes.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                releaseNotes.forEach { line ->
+                    Text(
+                        text = line.text,
+                        style = if (line.isHeading) {
+                            MaterialTheme.typography.titleSmall
+                        } else {
+                            MaterialTheme.typography.bodyMedium
+                        },
+                        fontWeight = if (line.isHeading) FontWeight.SemiBold else null,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        val scrollRange = scrollState.maxValue
+        val viewportSize = scrollState.viewportSize
+        if (scrollRange > 0 && viewportSize > 0) {
+            val thumbFraction = (viewportSize.toFloat() / (viewportSize + scrollRange).toFloat())
+                .coerceIn(0.35f, 1f)
+            ScrollIndicator(
+                scrollFraction = (scrollState.value.toFloat() / scrollRange).coerceIn(0f, 1f),
+                thumbFraction = thumbFraction,
+                modifier = Modifier.fillMaxHeight(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScrollIndicator(
+    scrollFraction: Float,
+    thumbFraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .width(3.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    ) {
+        val thumbHeight = (maxHeight * thumbFraction).coerceAtLeast(54.dp).coerceAtMost(maxHeight)
+        val maxOffset = (maxHeight - thumbHeight).coerceAtLeast(0.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(thumbHeight)
+                .offset(y = maxOffset * scrollFraction)
+                .clip(RoundedCornerShape(99.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+    }
+}
+
+private data class ReleaseNoteLine(
+    val text: String,
+    val isHeading: Boolean,
+)
+
+private fun String.markdownReleaseNoteLines(): List<ReleaseNoteLine> {
+    return lineSequence()
+        .mapNotNull { rawLine ->
+            val line = rawLine.trim()
+            if (line.isBlank() || line.startsWith("```")) {
+                return@mapNotNull null
+            }
+            val headingLevel = line.takeWhile { it == '#' }.length
+            val withoutHeading = if (headingLevel > 0) {
+                line.drop(headingLevel).trim()
+            } else {
+                line
+            }
+            val isBullet = withoutHeading.startsWith("- ") ||
+                withoutHeading.startsWith("* ") ||
+                withoutHeading.startsWith("+ ")
+            val isNumbered = withoutHeading.matches(Regex("""^\d+\.\s+.*"""))
+            val content = when {
+                isBullet -> withoutHeading.drop(2)
+                isNumbered -> withoutHeading.replaceFirst(Regex("""^\d+\.\s+"""), "")
+                else -> withoutHeading
+            }.cleanInlineMarkdown()
+            if (content.isBlank()) {
+                null
+            } else {
+                ReleaseNoteLine(
+                    text = if (isBullet || isNumbered) "- $content" else content,
+                    isHeading = headingLevel > 0,
+                )
+            }
+        }
+        .toList()
+}
+
+private fun String.cleanInlineMarkdown(): String {
+    return replace(Regex("""!\[([^]]*)]\(([^)]+)\)"""), "$1")
+        .replace(Regex("""\[([^]]+)]\(([^)]+)\)"""), "$1 ($2)")
+        .replace(Regex("""`([^`]*)`"""), "$1")
+        .replace(Regex("""<[^>]+>"""), "")
+        .replace("**", "")
+        .replace("__", "")
+        .replace("~~", "")
+        .replace("*", "")
+        .trim()
 }

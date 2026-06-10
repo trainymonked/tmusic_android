@@ -58,12 +58,14 @@ internal fun PlaylistContent(
     isPlaybackPlaying: Boolean,
     canPlayFromNetwork: Boolean,
     offlinePlayableTrackIds: Set<String>,
+    downloadedTrackIds: Set<String>,
     onTogglePlayback: () -> Unit,
     artworkBitmaps: Map<String, ImageBitmap>,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     isLoadingMore: Boolean,
     canLoadMore: Boolean,
     onLoadMore: () -> Unit,
+    offlineNotice: String?,
 ) {
     val isFavorites = playlist.isFavoritesPlaylist()
     val initialItems = remember(playlist.id, playlist.trackIds, playlist.playlistTrackIds, tracks) {
@@ -86,23 +88,23 @@ internal fun PlaylistContent(
     } else {
         offlinePlayableTrackIds + tracks.filter { it.downloadState == DownloadState.Downloaded }.map { it.id }
     }
-    val playlistDownloadState = aggregateDownloadState(
-        isOfflineEnabled = playlist.isOfflineEnabled,
-        expectedTrackCount = playlist.trackCount.coerceAtLeast(playlist.trackIds.size),
-        loadedTrackCount = playlist.trackIds.size,
-        tracks = tracks,
-    )
     val expectedTrackCount = playlist.trackCount.coerceAtLeast(tracks.size)
+    val downloadedTrackCount = playlist.trackIds.count { it in downloadedTrackIds }
+    val playlistDownloadState = when {
+        !playlist.isOfflineEnabled -> DownloadState.NotDownloaded
+        tracks.any { it.downloadState == DownloadState.Queued } -> DownloadState.Queued
+        expectedTrackCount > 0 && downloadedTrackCount >= expectedTrackCount -> DownloadState.Downloaded
+        else -> DownloadState.Queued
+    }
     val playlistSubtitle = buildString {
-        append(trackCountLabel(expectedTrackCount))
-        val downloadedTrackCount = tracks.count { it.downloadState == DownloadState.Downloaded }
-        if ((playlistDownloadState != DownloadState.NotDownloaded || downloadedTrackCount > 0) && expectedTrackCount > 0) {
-            append(" - ")
-            append(downloadedTrackCount)
-                .append(" of ")
-                .append(trackCountLabel(expectedTrackCount))
-                .append(" downloaded")
-        }
+        val totalDurationSeconds = playlist.totalDurationSeconds
+            ?: loadedTracksDurationSeconds(tracks, expectedTrackCount)
+        append(collectionStatsLabel(expectedTrackCount, totalDurationSeconds))
+    }
+    val downloadProgressPercent = if (playlist.isOfflineEnabled && expectedTrackCount > 0) {
+        ((downloadedTrackCount * 100) / expectedTrackCount).coerceIn(0, 100)
+    } else {
+        null
     }
     val listState = rememberLazyListState()
 
@@ -147,6 +149,7 @@ internal fun PlaylistContent(
                     artworkBitmap = artworkBitmaps.artworkBitmap(playlistArtworkKey(playlist), ArtworkImageSize.AlbumGrid),
                     coverKey = playlistArtworkKey(playlist),
                     downloadState = playlistDownloadState,
+                    downloadProgressPercent = downloadProgressPercent,
                     isFavorites = isFavorites,
                     canDownload = canDownload,
                     hasPlayableTracks = displayedItems.any { it.track.id in playableTrackIds },
@@ -160,6 +163,9 @@ internal fun PlaylistContent(
                     onTogglePlayback = onTogglePlayback,
                     onDownloadPlaylist = { onDownloadPlaylist(playlist) },
                 )
+                if (!offlineNotice.isNullOrBlank()) {
+                    OfflineNotice(offlineNotice)
+                }
             }
             if (displayedItems.isEmpty()) {
                 item { EmptyState("This playlist has no loaded tracks") }

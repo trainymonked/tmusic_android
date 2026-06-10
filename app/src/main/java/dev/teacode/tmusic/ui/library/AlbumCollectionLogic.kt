@@ -9,7 +9,11 @@ internal fun List<LibraryAlbum>.updateAlbum(updatedAlbum: LibraryAlbum): List<Li
         return this
     }
     return map { album ->
-        if (album.id == updatedAlbum.id) updatedAlbum else album
+        if (album.id == updatedAlbum.id) {
+            updatedAlbum.copy(totalDurationSeconds = updatedAlbum.totalDurationSeconds ?: album.totalDurationSeconds)
+        } else {
+            album
+        }
     }
 }
 

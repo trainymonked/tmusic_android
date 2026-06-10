@@ -26,14 +26,14 @@ fun <T> SlidingArtworkTransition(
         transitionSpec = {
             (
                 slideInHorizontally(
-                    animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                     initialOffsetX = { width -> normalizedDirection * (width * 0.78f).toInt() },
-                ) + fadeIn(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing))
+                ) + fadeIn(animationSpec = tween(durationMillis = 90, easing = FastOutSlowInEasing))
                 ) togetherWith (
                 slideOutHorizontally(
-                    animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                     targetOffsetX = { width -> -normalizedDirection * (width * 0.78f).toInt() },
-                ) + fadeOut(animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing))
+                ) + fadeOut(animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing))
                 )
         },
         label = label,
