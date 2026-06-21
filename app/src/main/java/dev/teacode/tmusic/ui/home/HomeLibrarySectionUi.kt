@@ -3,6 +3,7 @@ package dev.teacode.tmusic.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -32,7 +33,9 @@ fun HorizontalLibrarySection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = ScreenHorizontalPadding),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -47,7 +50,10 @@ fun HorizontalLibrarySection(
         if (isEmpty) {
             EmptyState(emptyText)
         } else {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = ScreenHorizontalPadding),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 content()
             }
         }

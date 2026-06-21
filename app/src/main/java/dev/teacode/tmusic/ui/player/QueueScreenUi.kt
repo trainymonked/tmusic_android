@@ -2,6 +2,7 @@ package dev.teacode.tmusic.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +45,7 @@ fun QueueScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = ScreenHorizontalPadding)
                         .weight(1f),
                     contentAlignment = Alignment.Center,
                 ) {

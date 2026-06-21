@@ -19,22 +19,31 @@ fun <T> SlidingArtworkTransition(
     modifier: Modifier = Modifier,
     content: @Composable (T) -> Unit,
 ) {
-    val normalizedDirection = if (direction < 0) -1 else 1
+    val normalizedDirection = when {
+        direction < 0 -> -1
+        direction > 0 -> 1
+        else -> 0
+    }
     AnimatedContent(
         targetState = targetState,
         modifier = modifier,
         transitionSpec = {
-            (
+            if (normalizedDirection == 0) {
+                fadeIn(animationSpec = tween(durationMillis = 0)) togetherWith
+                    fadeOut(animationSpec = tween(durationMillis = 0))
+            } else {
+                (
                 slideInHorizontally(
                     animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                     initialOffsetX = { width -> normalizedDirection * (width * 0.78f).toInt() },
                 ) + fadeIn(animationSpec = tween(durationMillis = 90, easing = FastOutSlowInEasing))
-                ) togetherWith (
-                slideOutHorizontally(
-                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                    targetOffsetX = { width -> -normalizedDirection * (width * 0.78f).toInt() },
-                ) + fadeOut(animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing))
-                )
+                    ) togetherWith (
+                    slideOutHorizontally(
+                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                        targetOffsetX = { width -> -normalizedDirection * (width * 0.78f).toInt() },
+                    ) + fadeOut(animationSpec = tween(durationMillis = 80, easing = FastOutSlowInEasing))
+                    )
+            }
         },
         label = label,
     ) { state ->

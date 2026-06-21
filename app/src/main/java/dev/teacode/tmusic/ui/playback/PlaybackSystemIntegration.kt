@@ -6,6 +6,7 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -18,6 +19,8 @@ import dev.teacode.tmusic.R
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.playback.PlaybackForegroundService
 import dev.teacode.tmusic.playback.playbackAttributionContext
+
+private const val PLAYBACK_SYSTEM_LOG_TAG = "TMusicPlayback"
 
 @Composable
 internal fun PlaybackSystemIntegration(
@@ -71,16 +74,25 @@ internal fun PlaybackSystemIntegration(
     LaunchedEffect(
         mediaSession,
         playerState.currentTrack?.id,
-        playerState.isPlaying,
-        playerState.progressSeconds,
-        playerState.streamUrl,
         artworkBitmap,
-        isFavorite,
     ) {
-        context.updateMediaSession(
+        context.updateMediaSessionMetadata(
             session = mediaSession,
             state = playerState,
             artworkBitmap = artworkBitmap,
+        )
+    }
+
+    LaunchedEffect(
+        mediaSession,
+        playerState.currentTrack?.id,
+        playerState.isPlaying,
+        playerState.progressSeconds,
+        playerState.streamUrl,
+        isFavorite,
+    ) {
+        mediaSession.updatePlaybackState(
+            state = playerState,
             isFavorite = isFavorite,
         )
     }
@@ -123,35 +135,36 @@ private fun android.content.Context.updatePlaybackService(
         canSkip = canSkip,
         token = session.sessionToken,
     )
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        startForegroundService(intent)
-    } else {
-        startService(intent)
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    } catch (error: IllegalStateException) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Log.e(
+                PLAYBACK_SYSTEM_LOG_TAG,
+                "Foreground playback service start was blocked by the system.",
+                error,
+            )
+        } else {
+            throw error
+        }
     }
 }
 
-private fun android.content.Context.updateMediaSession(
+private fun android.content.Context.updateMediaSessionMetadata(
     session: MediaSession,
     state: PlayerState,
     artworkBitmap: ImageBitmap?,
-    isFavorite: Boolean,
 ) {
     val currentTrack = state.currentTrack
     if (currentTrack == null) {
-        session.setPlaybackState(
-            PlaybackState.Builder()
-                .setState(PlaybackState.STATE_NONE, 0L, 0f)
-                .build(),
-        )
+        session.setMetadata(MediaMetadata.Builder().build())
         return
     }
 
-    val actions = PlaybackState.ACTION_PLAY or
-        PlaybackState.ACTION_PAUSE or
-        PlaybackState.ACTION_PLAY_PAUSE or
-        PlaybackState.ACTION_SEEK_TO or
-        PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-        PlaybackState.ACTION_SKIP_TO_NEXT
     val metadata = MediaMetadata.Builder()
         .putString(MediaMetadata.METADATA_KEY_TITLE, currentTrack.title)
         .putString(MediaMetadata.METADATA_KEY_ARTIST, currentTrack.displayArtistNames())
@@ -167,7 +180,29 @@ private fun android.content.Context.updateMediaSession(
         }
         .build()
     session.setMetadata(metadata)
-    session.setPlaybackState(
+}
+
+private fun MediaSession.updatePlaybackState(
+    state: PlayerState,
+    isFavorite: Boolean,
+) {
+    val currentTrack = state.currentTrack
+    if (currentTrack == null) {
+        setPlaybackState(
+            PlaybackState.Builder()
+                .setState(PlaybackState.STATE_NONE, 0L, 0f)
+                .build(),
+        )
+        return
+    }
+
+    val actions = PlaybackState.ACTION_PLAY or
+        PlaybackState.ACTION_PAUSE or
+        PlaybackState.ACTION_PLAY_PAUSE or
+        PlaybackState.ACTION_SEEK_TO or
+        PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+        PlaybackState.ACTION_SKIP_TO_NEXT
+    setPlaybackState(
         PlaybackState.Builder()
             .setActions(actions)
             .addCustomAction(

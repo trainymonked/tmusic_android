@@ -1,5 +1,6 @@
 package dev.teacode.tmusic.ui
 
+import androidx.media3.common.Player
 import dev.teacode.tmusic.domain.Track
 import kotlin.random.Random
 
@@ -177,8 +178,10 @@ internal fun prepareQueueForPlayback(
     queue: PlaybackQueue,
     track: Track,
     shuffleEnabled: Boolean,
+    preserveExistingShuffle: Boolean = false,
 ): PlaybackQueue {
     return when {
+        preserveExistingShuffle && queue.isShuffled -> queue
         shuffleEnabled && queue.isShuffled -> queue
         shuffleEnabled -> shuffleQueue(queue, track)
         queue.isShuffled -> restoreNaturalQueue(queue, track)
@@ -188,4 +191,243 @@ internal fun prepareQueueForPlayback(
             isShuffled = false,
         )
     }
+}
+
+internal data class ManualQueueInsertResult(
+    val queue: PlaybackQueue,
+    val insertionIndex: Int,
+    val anchorTrackId: String?,
+)
+
+internal fun PlaybackQueue.withManualTrackInsertedAfterCurrent(
+    track: Track,
+    currentTrack: Track?,
+    insertionAnchorTrackId: String?,
+    insertionCursor: Int?,
+): ManualQueueInsertResult {
+    val baseQueue = takeIf { it.tracks.isNotEmpty() }
+        ?: currentTrack?.let {
+            PlaybackQueue(
+                sourceType = PlaybackSourceType.Search,
+                sourceId = "Queue",
+                sourceTitle = "Queue",
+                tracks = listOf(it),
+                sourceTracks = listOf(it),
+                currentIndex = 0,
+            )
+        }
+        ?: PlaybackQueue(
+            sourceType = PlaybackSourceType.Search,
+            sourceId = "Queue",
+            sourceTitle = "Queue",
+            tracks = emptyList(),
+            sourceTracks = emptyList(),
+            currentIndex = -1,
+        )
+    val currentIndex = baseQueue.currentIndex
+        .takeIf { it in baseQueue.tracks.indices }
+        ?: currentTrack?.id
+            ?.let { trackId -> baseQueue.tracks.indexOfFirst { it.id == trackId } }
+            ?.takeIf { it >= 0 }
+        ?: baseQueue.currentIndex.coerceIn(0, baseQueue.tracks.lastIndex.coerceAtLeast(0))
+    val insertionBase = if (insertionAnchorTrackId == currentTrack?.id) {
+        insertionCursor?.coerceIn(currentIndex, baseQueue.tracks.lastIndex.coerceAtLeast(currentIndex))
+            ?: currentIndex
+    } else {
+        currentIndex
+    }
+    val insertionIndex = (insertionBase + 1).coerceIn(0, baseQueue.tracks.size)
+    val nextTracks = baseQueue.tracks.toMutableList().apply {
+        add(insertionIndex, track)
+    }
+    val nextManualFlags = baseQueue.normalizedManualQueueFlags().toMutableList().apply {
+        add(insertionIndex, true)
+    }
+    return ManualQueueInsertResult(
+        queue = baseQueue.copy(
+            tracks = nextTracks,
+            sourceTracks = baseQueue.naturalTracks(),
+            manualQueueFlags = nextManualFlags,
+            currentIndex = when {
+                baseQueue.currentIndex < 0 -> 0
+                insertionIndex <= baseQueue.currentIndex -> baseQueue.currentIndex + 1
+                else -> baseQueue.currentIndex
+            },
+            isShuffled = baseQueue.isShuffled,
+        ),
+        insertionIndex = insertionIndex,
+        anchorTrackId = currentTrack?.id,
+    )
+}
+
+internal data class QueueRemovalResult(
+    val queue: PlaybackQueue,
+    val nextQueueInsertionCursor: Int?,
+    val nextTrackToPlay: Track?,
+    val nextTrackIndex: Int,
+)
+
+internal fun PlaybackQueue.withTrackRemovedAt(index: Int, queueInsertionCursor: Int?): QueueRemovalResult? {
+    if (index !in tracks.indices) {
+        return null
+    }
+    val removedTrack = tracks[index]
+    val removedManual = isManualQueueItem(index)
+    val nextTracks = tracks.filterIndexed { itemIndex, _ -> itemIndex != index }
+    val nextManualFlags = normalizedManualQueueFlags()
+        .filterIndexed { itemIndex, _ -> itemIndex != index }
+    val nextSourceTracks = if (removedManual) {
+        naturalTracks()
+    } else {
+        naturalTracks().removeFirstOccurrenceById(removedTrack.id)
+    }
+    if (nextTracks.isEmpty()) {
+        return QueueRemovalResult(
+            queue = PlaybackQueue(),
+            nextQueueInsertionCursor = null,
+            nextTrackToPlay = null,
+            nextTrackIndex = -1,
+        )
+    }
+    val currentIndex = currentIndex.coerceIn(0, tracks.lastIndex)
+    val nextCurrentIndex = when {
+        index < currentIndex -> currentIndex - 1
+        index == currentIndex -> currentIndex.coerceAtMost(nextTracks.lastIndex)
+        else -> currentIndex
+    }
+    val nextCursor = queueInsertionCursor?.let { cursor ->
+        when {
+            index < cursor -> cursor - 1
+            index == cursor -> null
+            else -> cursor
+        }
+    }
+    return QueueRemovalResult(
+        queue = copy(
+            tracks = nextTracks,
+            sourceTracks = nextSourceTracks,
+            manualQueueFlags = nextManualFlags,
+            currentIndex = nextCurrentIndex,
+            isShuffled = isShuffled,
+        ),
+        nextQueueInsertionCursor = nextCursor,
+        nextTrackToPlay = if (index == currentIndex) nextTracks[nextCurrentIndex] else null,
+        nextTrackIndex = nextCurrentIndex,
+    )
+}
+
+internal fun PlaybackQueue.withReorderedTracks(
+    reorderedIndices: List<Int>,
+    currentTrackId: String?,
+): PlaybackQueue? {
+    if (
+        reorderedIndices.isEmpty() ||
+        reorderedIndices.size != tracks.size ||
+        reorderedIndices.toSet().size != tracks.size ||
+        reorderedIndices.any { it !in tracks.indices }
+    ) {
+        return null
+    }
+    val reorderedTracks = reorderedIndices.map(tracks::get)
+    val manualFlags = normalizedManualQueueFlags()
+    val reorderedManualFlags = reorderedIndices.map(manualFlags::get)
+    val activeOriginalIndex = currentIndex
+        .takeIf { it in tracks.indices && tracks[it].id == currentTrackId }
+        ?: currentTrackId
+            ?.let { trackId -> tracks.indexOfFirst { it.id == trackId } }
+            ?.takeIf { it >= 0 }
+        ?: currentIndex
+    val nextIndex = reorderedIndices.indexOf(activeOriginalIndex)
+        .takeIf { it >= 0 }
+        ?: currentIndex.coerceIn(0, reorderedTracks.lastIndex)
+    return copy(
+        tracks = reorderedTracks,
+        sourceTracks = reorderedTracks.filterIndexed { index, _ -> !reorderedManualFlags[index] },
+        manualQueueFlags = reorderedManualFlags,
+        currentIndex = nextIndex,
+        isShuffled = isShuffled,
+    )
+}
+
+internal fun selectedTrackIndexInResolvedTracks(
+    selectedTrack: Track,
+    selectedIndex: Int,
+    sourceTracks: List<Track>,
+    resolvedTracks: List<Track>,
+): Int {
+    if (resolvedTracks.isEmpty()) {
+        return -1
+    }
+    val selectedOccurrence = sourceTracks
+        .take(selectedIndex + 1)
+        .count { it.id == selectedTrack.id }
+        .coerceAtLeast(1)
+    var occurrence = 0
+    resolvedTracks.forEachIndexed { index, track ->
+        if (track.id == selectedTrack.id) {
+            occurrence += 1
+            if (occurrence == selectedOccurrence) {
+                return index
+            }
+        }
+    }
+    return resolvedTracks.indexOfFirst { it.id == selectedTrack.id }
+        .takeIf { it >= 0 }
+        ?: selectedIndex.coerceIn(resolvedTracks.indices)
+}
+
+internal fun PlaybackQueue.withResolvedTracksForCurrentTrack(
+    currentTrack: Track,
+    resolvedTracks: List<Track>,
+    resolvedSourceTracks: List<Track> = resolvedTracks,
+): PlaybackQueue? {
+    if (resolvedTracks.isEmpty()) {
+        return null
+    }
+    if (isShuffled) {
+        val activeTrack = resolvedTracks.firstOrNull { it.id == currentTrack.id }
+            ?: currentTrack
+        val remainingResolvedTracks = resolvedTracks.toMutableList().apply {
+            val activeIndex = indexOfFirst { it.id == activeTrack.id }
+            if (activeIndex >= 0) {
+                removeAt(activeIndex)
+            }
+        }
+        val nextTracks = listOf(activeTrack) + remainingResolvedTracks.shuffled(Random)
+        return copy(
+            tracks = nextTracks,
+            sourceTracks = resolvedSourceTracks,
+            currentIndex = 0,
+            manualQueueFlags = List(nextTracks.size) { false },
+            isShuffled = true,
+        )
+    }
+    val resolvedIndex = selectedTrackIndexInResolvedTracks(
+        selectedTrack = currentTrack,
+        selectedIndex = currentIndex.coerceAtLeast(0),
+        sourceTracks = tracks,
+        resolvedTracks = resolvedTracks,
+    )
+    return copy(
+        tracks = resolvedTracks,
+        sourceTracks = resolvedSourceTracks,
+        currentIndex = resolvedIndex,
+        manualQueueFlags = List(resolvedTracks.size) { false },
+    )
+}
+
+internal fun desiredExoRepeatMode(
+    mode: PlaybackRepeatMode,
+    hasGaplessQueue: Boolean,
+): Int {
+    return when {
+        mode == PlaybackRepeatMode.Track -> Player.REPEAT_MODE_ONE
+        mode == PlaybackRepeatMode.Queue && hasGaplessQueue -> Player.REPEAT_MODE_ALL
+        else -> Player.REPEAT_MODE_OFF
+    }
+}
+
+internal fun gaplessQueueKey(queue: PlaybackQueue): String {
+    return queue.playlistId
+        ?: "${queue.sourceType.name}:${queue.sourceId.orEmpty()}:${queue.sourceTitle.orEmpty()}:${queue.tracks.joinToString(",") { it.id }}"
 }

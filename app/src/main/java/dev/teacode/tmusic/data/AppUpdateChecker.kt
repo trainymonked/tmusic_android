@@ -1,13 +1,14 @@
 package dev.teacode.tmusic.data
 
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
-import kotlinx.coroutines.CancellationException
+import dev.teacode.tmusic.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 data class AppUpdateInfo(
     val version: String,
@@ -15,163 +16,74 @@ data class AppUpdateInfo(
     val changelog: String,
     val pageUrl: String,
     val downloadUrl: String,
+    val releaseNotesUrl: String = "",
+    val minSupportedVersionCode: Int? = null,
+    val latestVersionCode: Int? = null,
+    val forceUpdate: Boolean = false,
+    val blockingScopes: List<String> = emptyList(),
 )
 
-private const val DEFAULT_GITHUB_REPOSITORY = "trainymonked/tmusic_android"
 private const val APP_UPDATE_LOG_TAG = "TMusicUpdate"
 
 class AppUpdateChecker(
-    private val repository: String = DEFAULT_GITHUB_REPOSITORY,
+    private val loadConfig: suspend () -> AppUpdateInfo?,
+    private val githubRepository: String,
 ) {
     suspend fun latestUpdate(currentVersion: String): AppUpdateInfo? = withContext(Dispatchers.IO) {
-        Log.d(APP_UPDATE_LOG_TAG, "check start currentVersion=$currentVersion repository=$repository")
-        runCatching { latestReleaseUpdate(currentVersion) }
+        Log.d(
+            APP_UPDATE_LOG_TAG,
+            "check start currentVersion=$currentVersion currentCode=${BuildConfig.VERSION_CODE}",
+        )
+        val serverPolicy = runCatching { loadConfig() }
             .getOrElse { error ->
                 if (error is CancellationException) throw error
-                Log.w(APP_UPDATE_LOG_TAG, "release check failed", error)
+                Log.w(APP_UPDATE_LOG_TAG, "config check failed", error)
                 null
             }
             ?.also { update ->
-                Log.d(APP_UPDATE_LOG_TAG, "release check found update=${update.version} downloadUrl=${update.downloadUrl}")
+                Log.d(
+                    APP_UPDATE_LOG_TAG,
+                    "config check candidate version=${update.version} latestCode=${update.latestVersionCode} " +
+                        "minCode=${update.minSupportedVersionCode} force=${update.forceUpdate}",
+                )
             }
-            ?: runCatching { latestTagUpdate(currentVersion) }
-                .getOrElse { error ->
-                    if (error is CancellationException) throw error
-                    Log.w(APP_UPDATE_LOG_TAG, "tag check failed", error)
-                    null
-                }
-                ?.also { update ->
-                    Log.d(APP_UPDATE_LOG_TAG, "tag check found update=${update.version} downloadUrl=${update.downloadUrl}")
-                }
-                ?: run {
-                    Log.d(APP_UPDATE_LOG_TAG, "check finished: no newer update")
-                    null
-                }
-    }
-
-    private fun latestReleaseUpdate(currentVersion: String): AppUpdateInfo? {
-        val response = requestJsonObject("https://api.github.com/repos/$repository/releases/latest")
+        val githubUpdate = runCatching {
+            fetchLatestGithubReleaseUpdate(githubRepository)
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            Log.w(APP_UPDATE_LOG_TAG, "github release check failed repository=$githubRepository", error)
+            null
+        }
+        val candidate = githubUpdate?.withServerPolicy(serverPolicy)
+            ?: serverPolicy?.withGithubReleaseNotesIfNeeded()
+        candidate
+            ?.takeIf { update -> update.isAvailableForCurrentApp(currentVersion) }
+            ?.enforcedForCurrentApp()
             ?: run {
-                Log.d(APP_UPDATE_LOG_TAG, "release check: no release payload")
-                return null
+                Log.d(APP_UPDATE_LOG_TAG, "check finished: no newer update")
+                null
             }
-        val version = response.optString("tag_name").ifBlank { response.optString("name") }
-            .normalizedVersionTag()
-        Log.d(APP_UPDATE_LOG_TAG, "release check: candidate=$version current=$currentVersion")
-        if (!isAppVersionNewer(version, currentVersion)) {
-            Log.d(APP_UPDATE_LOG_TAG, "release check: candidate is not newer")
-            return null
-        }
-
-        val assets = response.optJSONArray("assets") ?: JSONArray()
-        val apkUrl = (0 until assets.length())
-            .asSequence()
-            .mapNotNull { index -> assets.optJSONObject(index) }
-            .firstOrNull { asset ->
-                val name = asset.optString("name")
-                val url = asset.optString("browser_download_url")
-                name.endsWith(".apk", ignoreCase = true) || url.endsWith(".apk", ignoreCase = true)
-            }
-            ?.optString("browser_download_url")
-            ?.takeIf { it.isNotBlank() }
-        val pageUrl = response.optString("html_url")
-            .takeIf { it.isNotBlank() }
-            ?: "https://github.com/$repository/releases/tag/$version"
-
-        return AppUpdateInfo(
-            version = version,
-            title = response.optString("name").takeIf { it.isNotBlank() } ?: version,
-            changelog = response.optString("body").trim(),
-            pageUrl = pageUrl,
-            downloadUrl = apkUrl ?: pageUrl,
-        )
     }
+}
 
-    private fun latestTagUpdate(currentVersion: String): AppUpdateInfo? {
-        val tags = requestJsonArray("https://api.github.com/repos/$repository/tags") ?: run {
-            Log.d(APP_UPDATE_LOG_TAG, "tag check: no tags payload")
-            return null
+fun AppUpdateInfo.isRequiredForCurrentApp(): Boolean {
+    return forceUpdate || minSupportedVersionCode?.let { BuildConfig.VERSION_CODE < it } == true
+}
+
+fun AppUpdateInfo.isAvailableForCurrentApp(currentVersion: String): Boolean {
+    return isRequiredForCurrentApp() ||
+        if (latestVersionCode != null) {
+            latestVersionCode > BuildConfig.VERSION_CODE
+        } else {
+            isAppVersionNewer(version, currentVersion)
         }
-        val tag = tags.optJSONObject(0) ?: run {
-            Log.d(APP_UPDATE_LOG_TAG, "tag check: empty tags response")
-            return null
-        }
-        val version = tag.optString("name").normalizedVersionTag()
-        Log.d(APP_UPDATE_LOG_TAG, "tag check: candidate=$version current=$currentVersion")
-        if (!isAppVersionNewer(version, currentVersion)) {
-            Log.d(APP_UPDATE_LOG_TAG, "tag check: candidate is not newer")
-            return null
-        }
+}
 
-        val commit = tag.optJSONObject("commit")
-        val commitDetails = commit?.optString("url")
-            ?.takeIf { it.isNotBlank() }
-            ?.let(::requestJsonObject)
-        val commitMessage = commitDetails
-            ?.optJSONObject("commit")
-            ?.optString("message")
-            ?.trim()
-            .orEmpty()
-        val pageUrl = commitDetails?.optString("html_url")
-            ?.takeIf { it.isNotBlank() }
-            ?: "https://github.com/$repository/releases/tag/$version"
-
-        return AppUpdateInfo(
-            version = version,
-            title = version,
-            changelog = commitMessage,
-            pageUrl = pageUrl,
-            downloadUrl = pageUrl,
-        )
-    }
-
-    private fun requestJsonObject(url: String): JSONObject? {
-        val body = request(url) ?: return null
-        return runCatching { JSONObject(body) }
-            .onFailure { error -> Log.w(APP_UPDATE_LOG_TAG, "failed to parse JSON object from $url", error) }
-            .getOrNull()
-    }
-
-    private fun requestJsonArray(url: String): JSONArray? {
-        val body = request(url) ?: return null
-        return runCatching { JSONArray(body) }
-            .onFailure { error -> Log.w(APP_UPDATE_LOG_TAG, "failed to parse JSON array from $url", error) }
-            .getOrNull()
-    }
-
-    private fun request(url: String): String? {
-        Log.d(APP_UPDATE_LOG_TAG, "GET $url")
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "TMusic-Android")
-        }
-        return try {
-            val responseCode = connection.responseCode
-            Log.d(
-                APP_UPDATE_LOG_TAG,
-                "GET $url -> HTTP $responseCode remaining=${connection.getHeaderField("X-RateLimit-Remaining")} reset=${connection.getHeaderField("X-RateLimit-Reset")}",
-            )
-            if (responseCode !in 200..299) {
-                val errorBody = runCatching {
-                    connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText().take(300) }
-                }.getOrNull()
-                if (!errorBody.isNullOrBlank()) {
-                    Log.w(APP_UPDATE_LOG_TAG, "GET $url error body: $errorBody")
-                }
-                return null
-            }
-            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private companion object {
-        const val CONNECT_TIMEOUT_MS = 4_000
-        const val READ_TIMEOUT_MS = 6_000
+fun AppUpdateInfo.enforcedForCurrentApp(): AppUpdateInfo {
+    return if (isRequiredForCurrentApp() && !forceUpdate) {
+        copy(forceUpdate = true)
+    } else {
+        this
     }
 }
 
@@ -199,4 +111,140 @@ fun isAppVersionNewer(candidateVersion: String, currentVersion: String): Boolean
 private fun String.semanticVersionParts(): List<Int> {
     return split('.', '-', '_')
         .mapNotNull { part -> part.takeWhile(Char::isDigit).toIntOrNull() }
+}
+
+private fun AppUpdateInfo.withGithubReleaseNotesIfNeeded(): AppUpdateInfo {
+    if (changelog.isNotBlank()) {
+        return this
+    }
+    val apiUrl = githubReleaseApiUrl() ?: return this
+    val notes = runCatching {
+        fetchGithubReleaseNotes(apiUrl)
+    }.onFailure { error ->
+        Log.w(APP_UPDATE_LOG_TAG, "release notes fetch failed url=$apiUrl", error)
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+        ?: return this
+    return copy(changelog = notes)
+}
+
+private fun AppUpdateInfo.withServerPolicy(policy: AppUpdateInfo?): AppUpdateInfo {
+    if (policy == null) {
+        return this
+    }
+    return copy(
+        minSupportedVersionCode = policy.minSupportedVersionCode,
+        forceUpdate = policy.forceUpdate || policy.isRequiredForCurrentApp(),
+        blockingScopes = policy.blockingScopes,
+    )
+}
+
+private fun fetchLatestGithubReleaseUpdate(repository: String): AppUpdateInfo? {
+    val normalizedRepository = repository.trim().removePrefix("https://github.com/").trim('/')
+    if (normalizedRepository.isBlank() || "/" !in normalizedRepository) {
+        Log.w(APP_UPDATE_LOG_TAG, "github release check skipped: invalid repository=$repository")
+        return null
+    }
+    val apiUrl = "https://api.github.com/repos/$normalizedRepository/releases/latest"
+    val release = fetchGithubRelease(apiUrl) ?: return null
+    return release.toAppUpdateInfo(apiUrl)
+}
+
+private fun AppUpdateInfo.githubReleaseApiUrl(): String? {
+    val candidates = listOf(releaseNotesUrl, pageUrl, downloadUrl)
+    for (candidate in candidates) {
+        val url = candidate.takeIf { it.isNotBlank() } ?: continue
+        if (url.startsWith("https://api.github.com/repos/") && "/releases/" in url) {
+            return url
+        }
+        githubReleaseRef(url)?.let { ref ->
+            return "https://api.github.com/repos/${ref.owner}/${ref.repo}/releases/tags/${ref.encodedTag()}"
+        }
+    }
+    return null
+}
+
+private data class GithubReleaseRef(
+    val owner: String,
+    val repo: String,
+    val tag: String,
+) {
+    fun encodedTag(): String {
+        return URLEncoder.encode(tag, Charsets.UTF_8.name()).replace("+", "%20")
+    }
+}
+
+private fun githubReleaseRef(url: String): GithubReleaseRef? {
+    val releasePage = Regex("""^https://github\.com/([^/]+)/([^/]+)/releases/tag/([^?#]+)""")
+    val releaseAsset = Regex("""^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/.*""")
+    val match = releasePage.find(url) ?: releaseAsset.find(url) ?: return null
+    return GithubReleaseRef(
+        owner = match.groupValues[1],
+        repo = match.groupValues[2].removeSuffix(".git"),
+        tag = match.groupValues[3],
+    )
+}
+
+private fun fetchGithubReleaseNotes(apiUrl: String): String? {
+    return fetchGithubRelease(apiUrl)?.body
+}
+
+private data class GithubRelease(
+    val tagName: String,
+    val name: String,
+    val body: String,
+    val htmlUrl: String,
+    val apkDownloadUrl: String,
+) {
+    fun toAppUpdateInfo(apiUrl: String): AppUpdateInfo {
+        val releaseVersion = tagName.takeIf { it.isNotBlank() } ?: name
+        val page = htmlUrl.takeIf { it.isNotBlank() } ?: apiUrl
+        return AppUpdateInfo(
+            version = releaseVersion,
+            title = name.takeIf { it.isNotBlank() } ?: releaseVersion,
+            changelog = body,
+            pageUrl = page,
+            downloadUrl = apkDownloadUrl.takeIf { it.isNotBlank() } ?: page,
+            releaseNotesUrl = apiUrl,
+        )
+    }
+}
+
+private fun fetchGithubRelease(apiUrl: String): GithubRelease? {
+    val connection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 8_000
+        readTimeout = 8_000
+        setRequestProperty("Accept", "application/vnd.github+json")
+        setRequestProperty("User-Agent", "TMusic-Android")
+    }
+    return try {
+        if (connection.responseCode !in 200..299) {
+            Log.w(APP_UPDATE_LOG_TAG, "release notes fetch http=${connection.responseCode} url=$apiUrl")
+            return null
+        }
+        val payload = connection.inputStream.bufferedReader().use { it.readText() }
+        val root = JSONObject(payload)
+        val assets = root.optJSONArray("assets")
+        var apkDownloadUrl = ""
+        if (assets != null) {
+            for (index in 0 until assets.length()) {
+                val asset = assets.optJSONObject(index) ?: continue
+                val name = asset.optString("name")
+                val url = asset.optString("browser_download_url")
+                if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
+                    apkDownloadUrl = url
+                    break
+                }
+            }
+        }
+        GithubRelease(
+            tagName = root.optString("tag_name"),
+            name = root.optString("name"),
+            body = root.optString("body"),
+            htmlUrl = root.optString("html_url"),
+            apkDownloadUrl = apkDownloadUrl,
+        )
+    } finally {
+        connection.disconnect()
+    }
 }

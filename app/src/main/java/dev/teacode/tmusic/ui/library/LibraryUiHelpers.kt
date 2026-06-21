@@ -2,6 +2,7 @@ package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
+import dev.teacode.tmusic.domain.LibrarySearchResults
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
 
@@ -22,9 +23,14 @@ fun albumListSubtitle(album: LibraryAlbum): String {
 }
 
 fun LibraryAlbum.displayArtistNames(): String {
-    val names = artist.artistNameParts()
+    val names = (artists.map { it.name } + artist.artistNameParts())
         .distinctBy { it.lowercase() }
     return names.joinToString(" \u2022 ").ifBlank { artist.replace(';', '\u2022') }
+}
+
+fun LibraryAlbum.hasNavigableDisplayArtist(): Boolean {
+    return (artists.map { it.name } + artist.artistNameParts())
+        .any { !it.isVariousArtistsName() }
 }
 
 fun trackCountLabel(count: Int): String {
@@ -110,17 +116,23 @@ fun Track.listArtworkKey(): String {
 }
 
 fun Track.artistLogicNames(): List<String> {
-    return (listOfNotNull(albumArtist) + artist)
+    return (artists.map { it.name } + listOf(artist) + albumArtists.map { it.name } + listOfNotNull(albumArtist))
         .flatMap { it.artistNameParts() }
         .distinctBy { it.lowercase() }
 }
 
 fun LibraryAlbum.artistLogicNames(): List<String> {
-    return artist.artistNameParts()
+    return (artists.map { it.name } + artist.artistNameParts())
         .distinctBy { it.lowercase() }
 }
 
 fun Track.artistReferences(): List<LibraryArtist> {
+    if (artists.isNotEmpty()) {
+        return artists.distinctBy { it.id }.withoutVariousArtists()
+    }
+    if (albumArtists.isNotEmpty()) {
+        return albumArtists.distinctBy { it.id }.withoutVariousArtists()
+    }
     val names = artistLogicNames()
     val ids = artistIds
         .ifEmpty { listOfNotNull(artistId, albumArtistId) }
@@ -130,33 +142,115 @@ fun Track.artistReferences(): List<LibraryArtist> {
             id = id,
             name = names.getOrNull(index) ?: names.firstOrNull() ?: id,
         )
-    }
+    }.withoutVariousArtists()
 }
 
 fun LibraryAlbum.artistReferences(albumTracks: List<Track>): List<LibraryArtist> {
+    if (artists.isNotEmpty()) {
+        return artists.distinctBy { it.id }.withoutVariousArtists()
+    }
     val names = artistLogicNames()
     val ids = (
         artistIds.ifEmpty { listOfNotNull(artistId) } +
             albumTracks
                 .filter { track -> track.albumId == id || track.album == title }
                 .flatMap { track ->
-                    listOfNotNull(track.albumArtistId, track.artistId) + track.artistIds
+                    track.albumArtists.map { it.id } +
+                        listOfNotNull(track.albumArtistId, track.artistId) +
+                        track.artistIds
                 }
         )
         .filter { it.isNotBlank() }
         .distinct()
+    val referencedArtists = albumTracks
+        .filter { track -> track.albumId == id || track.album == title }
+        .flatMap { track -> track.albumArtists.ifEmpty { track.artists } }
+        .distinctBy { it.id }
+        .withoutVariousArtists()
+    if (referencedArtists.isNotEmpty()) {
+        return referencedArtists
+    }
     return ids.mapIndexed { index, artistId ->
         LibraryArtist(
             id = artistId,
             name = names.getOrNull(index) ?: names.firstOrNull() ?: artistId,
         )
+    }.withoutVariousArtists()
+}
+
+fun Track.artistOptions(resolveCachedArtist: (String) -> LibraryArtist?): List<LibraryArtist> {
+    return (artistReferences() + artistLogicNames().filterNot { it.isVariousArtistsName() }.mapNotNull(resolveCachedArtist))
+        .distinctBy { it.id }
+        .withoutVariousArtists()
+}
+
+fun LibraryAlbum.artistOptions(
+    albumTracks: List<Track>,
+    allTracks: List<Track>,
+    resolveCachedArtist: (String) -> LibraryArtist?,
+): List<LibraryArtist> {
+    return (
+        artistReferences(albumTracks + allTracks) +
+            artistLogicNames().filterNot { it.isVariousArtistsName() }.mapNotNull(resolveCachedArtist)
+        )
+        .distinctBy { it.id }
+        .withoutVariousArtists()
+}
+
+fun resolveCachedArtist(
+    artistName: String,
+    artists: List<LibraryArtist>,
+    searchResults: LibrarySearchResults,
+    similarArtistsByArtist: Map<String, List<LibraryArtist>>,
+): LibraryArtist? {
+    val normalizedName = artistName.trim()
+    val candidates = artists + searchResults.artists + similarArtistsByArtist.values.flatten()
+    return candidates.firstOrNull { candidate ->
+        candidate.name.equals(normalizedName, ignoreCase = true)
     }
+}
+
+fun Track.navigationAlbum(): LibraryAlbum {
+    val albumArtistReferences = albumArtists.ifEmpty { artists }
+    return LibraryAlbum(
+        id = albumId.orEmpty(),
+        title = album,
+        artist = albumArtist
+            ?: albumArtistReferences.map { it.name }.takeIf { it.isNotEmpty() }?.joinToString(" \u2022 ")
+            ?: artistLogicNames().firstOrNull()
+            ?: artist,
+        artistId = albumArtistReferences.firstOrNull()?.id
+            ?: albumArtistId
+            ?: artistId
+            ?: artistIds.firstOrNull(),
+        artistIds = (
+            albumArtistReferences.map { it.id } +
+                listOfNotNull(albumArtistId, artistId) +
+                artistIds
+            )
+            .filter { it.isNotBlank() }
+            .distinct(),
+        artists = albumArtistReferences,
+        releaseYear = releaseYear,
+        genre = genre,
+        trackCount = 0,
+        accentColor = accentColor,
+        artworkTrackId = id,
+    )
 }
 
 private fun String.artistNameParts(): List<String> {
     return split(';')
         .map { it.trim() }
         .filter { it.isNotBlank() }
+}
+
+private fun String.isVariousArtistsName(): Boolean {
+    return trim().equals("Various Artists", ignoreCase = true)
+}
+
+private fun List<LibraryArtist>.withoutVariousArtists(): List<LibraryArtist> {
+    return filterNot { artist -> artist.name.isVariousArtistsName() }
 }
 
 fun Playlist.isFavoritesPlaylist(): Boolean {

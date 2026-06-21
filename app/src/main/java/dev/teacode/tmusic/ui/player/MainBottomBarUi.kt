@@ -13,6 +13,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.domain.Track
@@ -20,6 +21,7 @@ import dev.teacode.tmusic.domain.Track
 @Composable
 internal fun MainBottomBar(
     visible: Boolean,
+    fullPlayerRevealProgress: Float,
     selectedTab: AppTab,
     playerState: PlayerState,
     artworkBitmap: ImageBitmap?,
@@ -47,7 +49,11 @@ internal fun MainBottomBar(
             targetOffsetY = { it },
         ),
     ) {
-        Column {
+        Column(
+            modifier = Modifier.graphicsLayer {
+                alpha = (1f - fullPlayerRevealProgress).coerceIn(0f, 1f)
+            },
+        ) {
             MiniPlayer(
                 playerState = playerState,
                 artworkBitmap = artworkBitmap,

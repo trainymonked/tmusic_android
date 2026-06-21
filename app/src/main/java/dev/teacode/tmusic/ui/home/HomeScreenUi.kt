@@ -1,7 +1,7 @@
 package dev.teacode.tmusic.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,37 +10,34 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.dp
+import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
-import dev.teacode.tmusic.domain.Track
 
 @Composable
 fun HomeScreen(
     artists: List<LibraryArtist>,
-    recentTracks: List<Track>,
+    recentAlbums: List<LibraryAlbum>,
     databaseTrackCount: Int?,
     offlineTrackCount: Int,
     artworkBitmaps: Map<String, ImageBitmap>,
     listState: LazyListState,
-    onlineMode: Boolean,
     syncMode: SyncMode,
     isLoading: Boolean,
-    playableTrackIds: Set<String>,
+    isLoadingMoreRecentAlbums: Boolean,
+    canLoadMoreRecentAlbums: Boolean,
     onRefresh: () -> Unit,
+    onLoadMoreRecentAlbums: () -> Unit,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     onShowAllArtists: () -> Unit,
     onSelectArtist: (LibraryArtist) -> Unit,
-    onAddTrackToPlaylist: ((Track) -> Unit)?,
-    onAddTrackToQueue: (Track) -> Unit,
-    onGoToTrackArtist: (Track) -> Unit,
-    onGoToTrackAlbum: (Track) -> Unit,
-    favoriteTrackIds: Set<String>,
-    onToggleTrackFavorite: ((Track) -> Unit)?,
-    onSelectTrack: (Track) -> Unit,
+    onSelectAlbum: (LibraryAlbum) -> Unit,
 ) {
     val status = when (syncMode) {
         SyncMode.Offline -> "Offline"
@@ -49,13 +46,25 @@ fun HomeScreen(
         SyncMode.OfflineOnly -> "Offline only"
     }
     val showLoadingSkeleton = isLoading &&
-        (syncMode == SyncMode.Syncing || (artists.isEmpty() && recentTracks.isEmpty()))
+        (syncMode == SyncMode.Syncing || (artists.isEmpty() && recentAlbums.isEmpty()))
+    val homeLazyItemCount = 2 + if (recentAlbums.isNotEmpty()) {
+        1 + recentAlbums.size + if (isLoadingMoreRecentAlbums) 1 else 0
+    } else {
+        0
+    }
     LaunchedEffect(artists) {
         artists.take(12)
             .map(::artistArtworkKey)
             .distinct()
             .forEach { artworkKey -> onRequestArtwork(artworkKey, ArtworkImageSize.AlbumGrid) }
     }
+    LoadMoreEffect(
+        listState = listState,
+        itemCount = homeLazyItemCount,
+        canLoadMore = canLoadMoreRecentAlbums,
+        isLoading = isLoading || isLoadingMoreRecentAlbums,
+        onLoadMore = onLoadMoreRecentAlbums,
+    )
 
     SwipeRefreshContainer(
         enabled = true,
@@ -70,62 +79,85 @@ fun HomeScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            item {
-                HomeHeader(
-                    trackCount = databaseTrackCount,
-                    offlineTrackCount = offlineTrackCount,
-                    showOfflineTrackCount = syncMode == SyncMode.Offline || syncMode == SyncMode.OfflineOnly,
-                    status = status,
-                )
-            }
-            item {
-                HorizontalLibrarySection(
-                    title = "Artists",
-                    isEmpty = artists.isEmpty(),
-                    emptyText = "No artists loaded yet",
-                    onShowAll = onShowAllArtists,
-                ) {
-                    items(artists.take(12), key = { it.id }) { artist ->
-                        val coverTrackId = artistArtworkKey(artist)
-                        ArtistCard(
-                            artist = artist,
-                            artworkBitmap = artworkBitmaps.artworkBitmap(coverTrackId, ArtworkImageSize.AlbumGrid),
-                            coverTrackId = coverTrackId,
-                            onRequestArtwork = onRequestArtwork,
-                            onClick = { onSelectArtist(artist) },
-                            modifier = Modifier.width(112.dp),
-                        )
-                    }
+            item(key = "home-header") {
+                Box(modifier = Modifier.padding(start = ScreenHorizontalPadding, end = ScreenHorizontalPadding, bottom = 14.dp)) {
+                    HomeHeader(
+                        trackCount = databaseTrackCount,
+                        offlineTrackCount = offlineTrackCount,
+                        showOfflineTrackCount = syncMode == SyncMode.Offline || syncMode == SyncMode.OfflineOnly,
+                        status = status,
+                    )
                 }
             }
-            if (recentTracks.isNotEmpty()) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        SectionTitle("Latest tracks", modifier = Modifier.padding(top = 2.dp, bottom = 2.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            recentTracks.forEach { track ->
-                                TrackRow(
-                                    track = track,
-                                    artworkBitmap = artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.TrackList),
-                                    onRequestArtwork = onRequestArtwork,
-                                    onClick = { onSelectTrack(track) },
-                                    showDownloadBadge = false,
-                                    onAddToPlaylist = onAddTrackToPlaylist?.let { add -> { add(track) } },
-                                    onAddToQueue = { onAddTrackToQueue(track) },
-                                    onGoToArtist = { onGoToTrackArtist(track) },
-                                    onGoToAlbum = track.albumId?.let { { onGoToTrackAlbum(track) } },
-                                    isFavorite = track.id in favoriteTrackIds,
-                                    onToggleFavorite = onToggleTrackFavorite?.let { toggle -> { toggle(track) } },
-                                    enabled = onlineMode || track.id in playableTrackIds,
-                                )
-                            }
+            item(key = "home-artists") {
+                Box(modifier = Modifier.padding(bottom = 14.dp)) {
+                    HorizontalLibrarySection(
+                        title = "Artists",
+                        isEmpty = artists.isEmpty(),
+                        emptyText = "No artists loaded yet",
+                        onShowAll = onShowAllArtists,
+                    ) {
+                        items(artists.take(12), key = { it.id }) { artist ->
+                            val coverTrackId = artistArtworkKey(artist)
+                            ArtistCard(
+                                artist = artist,
+                                artworkBitmap = artworkBitmaps.artworkBitmap(coverTrackId, ArtworkImageSize.AlbumGrid),
+                                coverTrackId = coverTrackId,
+                                onRequestArtwork = onRequestArtwork,
+                                onClick = { onSelectArtist(artist) },
+                                modifier = Modifier.width(112.dp),
+                            )
                         }
                     }
                 }
             }
+            if (recentAlbums.isNotEmpty()) {
+                item(key = "latest-albums-title") {
+                    SectionTitle(
+                        "Latest albums",
+                        modifier = Modifier.padding(
+                            start = ScreenHorizontalPadding,
+                            end = ScreenHorizontalPadding,
+                            top = 2.dp,
+                            bottom = 6.dp,
+                        ),
+                    )
+                }
+                itemsIndexed(
+                    items = recentAlbums,
+                    key = { index, album -> "recent-album-${album.id}-$index" },
+                ) { _, album ->
+                    val coverTrackId = albumArtworkKey(album, emptyList(), emptyMap())
+                    AlbumListRow(
+                        album = album,
+                        artworkBitmap = artworkBitmaps.artworkBitmap(coverTrackId, ArtworkImageSize.AlbumGrid),
+                        coverTrackId = coverTrackId,
+                        onRequestArtwork = onRequestArtwork,
+                        onClick = { onSelectAlbum(album) },
+                        recentBadge = album.recentChangeBadgeLabel(),
+                    )
+                }
+                if (isLoadingMoreRecentAlbums) {
+                    item(key = "latest-albums-loading") {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                        )
+                    }
+                }
+            }
         }
+    }
+}
+
+private fun LibraryAlbum.recentChangeBadgeLabel(): String? {
+    return when ((recentChangeType ?: recentChange?.type).orEmpty().lowercase()) {
+        "new" -> "NEW"
+        "updated", "upd" -> "UPD"
+        else -> null
     }
 }

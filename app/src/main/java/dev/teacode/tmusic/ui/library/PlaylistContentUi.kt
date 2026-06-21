@@ -2,9 +2,12 @@ package dev.teacode.tmusic.ui
 
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,17 +40,19 @@ internal fun PlaylistContent(
     playlist: Playlist,
     tracks: List<Track>,
     canDownload: Boolean,
+    canDownloadMedia: Boolean,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     onSelectTrack: (Int) -> Unit,
     onDownloadPlaylist: (Playlist) -> Unit,
+    onDeletePlaylistDownload: (Playlist) -> Unit,
     onAddTrackToPlaylist: ((Track) -> Unit)?,
     onAddTrackToQueue: (Track) -> Unit,
     onGoToTrackArtist: (Track) -> Unit,
     onGoToTrackAlbum: (Track) -> Unit,
     favoriteTrackIds: Set<String>,
     onToggleTrackFavorite: ((Track) -> Unit)?,
-    onRemoveTrack: (String) -> Unit,
+    onRemoveTrack: (String, String) -> Unit,
     onReorderTracks: (List<String>) -> Unit,
     onEditPlaylist: () -> Unit,
     onDeletePlaylist: () -> Unit,
@@ -72,8 +77,7 @@ internal fun PlaylistContent(
         tracks.mapIndexed { index, track ->
             PlaylistTrackListItem(
                 originalIndex = index,
-                playlistTrackId = playlist.playlistTrackIds.getOrNull(index)
-                    ?: playlist.playlistTrackIdsByTrackId[track.id],
+                playlistTrackId = playlist.playlistTrackIds.getOrNull(index),
                 track = track,
             )
         }
@@ -83,28 +87,46 @@ internal fun PlaylistContent(
     var draggedIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
     val reorderStepPx = with(LocalDensity.current) { 56.dp.toPx() }
-    val playableTrackIds = if (canPlayFromNetwork) {
-        tracks.map { it.id }.toSet()
-    } else {
-        offlinePlayableTrackIds + tracks.filter { it.downloadState == DownloadState.Downloaded }.map { it.id }
+    val playableTrackIds = remember(canPlayFromNetwork, tracks, offlinePlayableTrackIds) {
+        if (canPlayFromNetwork) {
+            tracks.map { it.id }.toSet()
+        } else {
+            offlinePlayableTrackIds + tracks.filter { it.downloadState == DownloadState.Downloaded }.map { it.id }
+        }
     }
     val expectedTrackCount = playlist.trackCount.coerceAtLeast(tracks.size)
-    val downloadedTrackCount = playlist.trackIds.count { it in downloadedTrackIds }
-    val playlistDownloadState = when {
-        !playlist.isOfflineEnabled -> DownloadState.NotDownloaded
-        tracks.any { it.downloadState == DownloadState.Queued } -> DownloadState.Queued
-        expectedTrackCount > 0 && downloadedTrackCount >= expectedTrackCount -> DownloadState.Downloaded
-        else -> DownloadState.Queued
+    val downloadedTrackCount = remember(playlist.trackIds, downloadedTrackIds) {
+        playlist.trackIds.count { it in downloadedTrackIds }
     }
-    val playlistSubtitle = buildString {
-        val totalDurationSeconds = playlist.totalDurationSeconds
-            ?: loadedTracksDurationSeconds(tracks, expectedTrackCount)
-        append(collectionStatsLabel(expectedTrackCount, totalDurationSeconds))
+    val hasQueuedTracks = remember(tracks) {
+        tracks.any { it.downloadState == DownloadState.Queued }
     }
-    val downloadProgressPercent = if (playlist.isOfflineEnabled && expectedTrackCount > 0) {
-        ((downloadedTrackCount * 100) / expectedTrackCount).coerceIn(0, 100)
-    } else {
-        null
+    val playlistDownloadState = remember(
+        playlist.isOfflineEnabled,
+        hasQueuedTracks,
+        expectedTrackCount,
+        downloadedTrackCount,
+    ) {
+        when {
+            !playlist.isOfflineEnabled -> DownloadState.NotDownloaded
+            hasQueuedTracks -> DownloadState.Queued
+            expectedTrackCount > 0 && downloadedTrackCount >= expectedTrackCount -> DownloadState.Downloaded
+            else -> DownloadState.Queued
+        }
+    }
+    val playlistSubtitle = remember(playlist.totalDurationSeconds, tracks, expectedTrackCount) {
+        buildString {
+            val totalDurationSeconds = playlist.totalDurationSeconds
+                ?: loadedTracksDurationSeconds(tracks, expectedTrackCount)
+            append(collectionStatsLabel(expectedTrackCount, totalDurationSeconds))
+        }
+    }
+    val downloadProgressPercent = remember(playlist.isOfflineEnabled, expectedTrackCount, downloadedTrackCount) {
+        if (playlist.isOfflineEnabled && expectedTrackCount > 0) {
+            ((downloadedTrackCount * 100) / expectedTrackCount).coerceIn(0, 100)
+        } else {
+            null
+        }
     }
     val listState = rememberLazyListState()
 
@@ -139,36 +161,46 @@ internal fun PlaylistContent(
             state = listState,
             userScrollEnabled = draggedIndex == null,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             item {
-                PlaylistHeader(
-                    playlist = playlist,
-                    subtitle = playlistSubtitle,
-                    artworkBitmap = artworkBitmaps.artworkBitmap(playlistArtworkKey(playlist), ArtworkImageSize.AlbumGrid),
-                    coverKey = playlistArtworkKey(playlist),
-                    downloadState = playlistDownloadState,
-                    downloadProgressPercent = downloadProgressPercent,
-                    isFavorites = isFavorites,
-                    canDownload = canDownload,
-                    hasPlayableTracks = displayedItems.any { it.track.id in playableTrackIds },
-                    isActivePlaylist = isActivePlaylist,
-                    isPlaybackPlaying = isPlaybackPlaying,
-                    onRequestArtwork = onRequestArtwork,
-                    onDeleteClick = onDeletePlaylist,
-                    onEditClick = onEditPlaylist,
-                    onPlayPlaylist = onPlayPlaylist,
-                    onShufflePlayPlaylist = onShufflePlayPlaylist,
-                    onTogglePlayback = onTogglePlayback,
-                    onDownloadPlaylist = { onDownloadPlaylist(playlist) },
-                )
+                Column(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                    PlaylistHeader(
+                        playlist = playlist,
+                        subtitle = playlistSubtitle,
+                        artworkBitmap = artworkBitmaps.artworkBitmap(playlistArtworkKey(playlist), ArtworkImageSize.AlbumGrid),
+                        coverKey = playlistArtworkKey(playlist),
+                        downloadState = playlistDownloadState,
+                        downloadProgressPercent = downloadProgressPercent,
+                        isFavorites = isFavorites,
+                        canEdit = canDownload,
+                        canDownload = canDownloadMedia,
+                        hasPlayableTracks = displayedItems.any { it.track.id in playableTrackIds },
+                        isActivePlaylist = isActivePlaylist,
+                        isPlaybackPlaying = isPlaybackPlaying,
+                        onRequestArtwork = onRequestArtwork,
+                        onDeleteClick = onDeletePlaylist,
+                        onEditClick = onEditPlaylist,
+                        onPlayPlaylist = onPlayPlaylist,
+                        onShufflePlayPlaylist = onShufflePlayPlaylist,
+                        onTogglePlayback = onTogglePlayback,
+                        onDownloadPlaylist = { onDownloadPlaylist(playlist) },
+                        onDeletePlaylistDownload = { onDeletePlaylistDownload(playlist) },
+                    )
+                }
                 if (!offlineNotice.isNullOrBlank()) {
-                    OfflineNotice(offlineNotice)
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        OfflineNotice(offlineNotice)
+                    }
                 }
             }
             if (displayedItems.isEmpty()) {
-                item { EmptyState("This playlist has no loaded tracks") }
+                item {
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        EmptyState("This playlist has no loaded tracks")
+                    }
+                }
             } else {
                 itemsIndexed(
                     displayedItems,
@@ -192,12 +224,12 @@ internal fun PlaylistContent(
                         isFavorite = track.id in favoriteTrackIds,
                         onToggleFavorite = onToggleTrackFavorite?.let { toggle -> { toggle(track) } },
                         onRemoveFromPlaylist = if (!isFavorites && canDownload && item.playlistTrackId != null) {
-                            { onRemoveTrack(item.playlistTrackId) }
+                            { onRemoveTrack(item.playlistTrackId, track.id) }
                         } else {
                             null
                         },
                         downloadBadgePlacement = DownloadBadgePlacement.BeforeTitle,
-                        enabled = track.id in playableTrackIds,
+                        enabled = true,
                         modifier = Modifier
                             .zIndex(if (draggedKey == itemKey) 1f else 0f)
                             .graphicsLayer { translationY = if (draggedKey == itemKey) dragOffset else 0f }

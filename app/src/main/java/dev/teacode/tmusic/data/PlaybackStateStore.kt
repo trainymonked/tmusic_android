@@ -1,7 +1,9 @@
 package dev.teacode.tmusic.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import dev.teacode.tmusic.domain.DownloadState
+import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.Track
 import org.json.JSONArray
 import org.json.JSONObject
@@ -75,30 +77,14 @@ class PlaybackStateStore(context: Context) {
             .putString(KEY_SOURCE_TRACKS_JSON, state.sourceTracks.toTrackJson())
             .putBoolean(KEY_IS_SHUFFLED, state.isShuffled)
             .putInt(KEY_CURRENT_INDEX, state.currentIndex)
-            .putString(KEY_TRACK_ID, state.trackId)
-            .putString(KEY_TRACK_TITLE, state.track?.title)
-            .putString(KEY_TRACK_ARTIST, state.track?.artist)
-            .putString(KEY_TRACK_ALBUM, state.track?.album)
-            .putInt(KEY_TRACK_DURATION_SECONDS, state.track?.durationSeconds ?: 0)
-            .putString(KEY_TRACK_SERVER_PATH, state.track?.serverPath)
-            .putLong(KEY_TRACK_ACCENT_COLOR, state.track?.accentColor ?: 0xFF444444)
-            .putInt(KEY_TRACK_PLAY_COUNT, state.track?.playCount ?: 0)
-            .putString(KEY_TRACK_ARTIST_ID, state.track?.artistId)
-            .putString(KEY_TRACK_ARTIST_IDS, state.track?.artistIds?.joinToString("\n"))
-            .putString(KEY_TRACK_ALBUM_ID, state.track?.albumId)
-            .putString(KEY_TRACK_ALBUM_ARTIST, state.track?.albumArtist)
-            .putString(KEY_TRACK_ALBUM_ARTIST_ID, state.track?.albumArtistId)
-            .putInt(KEY_TRACK_NUMBER, state.track?.trackNumber ?: -1)
-            .putInt(KEY_TRACK_DISC_NUMBER, state.track?.discNumber ?: -1)
-            .putInt(KEY_TRACK_RELEASE_YEAR, state.track?.releaseYear ?: -1)
-            .putString(KEY_TRACK_GENRE, state.track?.genre)
-            .putBoolean(KEY_TRACK_IS_LIKED, state.track?.isLiked == true)
-            .putBoolean(KEY_TRACK_HAS_IS_LIKED, state.track?.isLiked != null)
-            .putLong(KEY_POSITION_MS, state.positionMs.coerceAtLeast(0L))
-            .putBoolean(KEY_WAS_PLAYING, state.wasPlaying)
-            .putString(KEY_SCROBBLE_CLIENT_EVENT_ID, state.scrobbleClientEventId)
-            .putString(KEY_SCROBBLE_PLAYED_AT, state.scrobblePlayedAt)
-            .putLong(KEY_SCROBBLE_DURATION_PLAYED_MS, state.scrobbleDurationPlayedMs.coerceAtLeast(0L))
+            .putRuntimeState(state)
+            .apply()
+    }
+
+    fun saveRuntime(state: SavedPlaybackState) {
+        preferences.edit()
+            .putInt(KEY_CURRENT_INDEX, state.currentIndex)
+            .putRuntimeState(state)
             .apply()
     }
 
@@ -123,9 +109,11 @@ class PlaybackStateStore(context: Context) {
             playCount = preferences.getInt(KEY_TRACK_PLAY_COUNT, 0).coerceAtLeast(0),
             artistId = preferences.getString(KEY_TRACK_ARTIST_ID, null)?.takeIf { it.isNotBlank() },
             artistIds = preferences.getString(KEY_TRACK_ARTIST_IDS, null).toIdList(),
+            artists = preferences.getString(KEY_TRACK_ARTISTS_JSON, null).toArtistList(),
             albumId = preferences.getString(KEY_TRACK_ALBUM_ID, null)?.takeIf { it.isNotBlank() },
             albumArtist = preferences.getString(KEY_TRACK_ALBUM_ARTIST, null)?.takeIf { it.isNotBlank() },
             albumArtistId = preferences.getString(KEY_TRACK_ALBUM_ARTIST_ID, null)?.takeIf { it.isNotBlank() },
+            albumArtists = preferences.getString(KEY_TRACK_ALBUM_ARTISTS_JSON, null).toArtistList(),
             trackNumber = preferences.getInt(KEY_TRACK_NUMBER, -1).takeIf { it >= 0 },
             discNumber = preferences.getInt(KEY_TRACK_DISC_NUMBER, -1).takeIf { it >= 0 },
             releaseYear = preferences.getInt(KEY_TRACK_RELEASE_YEAR, -1).takeIf { it > 0 },
@@ -138,12 +126,48 @@ class PlaybackStateStore(context: Context) {
         )
     }
 
+    private fun SharedPreferences.Editor.putRuntimeState(state: SavedPlaybackState): SharedPreferences.Editor {
+        return putString(KEY_TRACK_ID, state.trackId)
+            .putString(KEY_TRACK_TITLE, state.track?.title)
+            .putString(KEY_TRACK_ARTIST, state.track?.artist)
+            .putString(KEY_TRACK_ALBUM, state.track?.album)
+            .putInt(KEY_TRACK_DURATION_SECONDS, state.track?.durationSeconds ?: 0)
+            .putString(KEY_TRACK_SERVER_PATH, state.track?.serverPath)
+            .putLong(KEY_TRACK_ACCENT_COLOR, state.track?.accentColor ?: 0xFF444444)
+            .putInt(KEY_TRACK_PLAY_COUNT, state.track?.playCount ?: 0)
+            .putString(KEY_TRACK_ARTIST_ID, state.track?.artistId)
+            .putString(KEY_TRACK_ARTIST_IDS, state.track?.artistIds?.joinToString("\n"))
+            .putString(KEY_TRACK_ARTISTS_JSON, state.track?.artists?.toArtistJsonArray()?.toString())
+            .putString(KEY_TRACK_ALBUM_ID, state.track?.albumId)
+            .putString(KEY_TRACK_ALBUM_ARTIST, state.track?.albumArtist)
+            .putString(KEY_TRACK_ALBUM_ARTIST_ID, state.track?.albumArtistId)
+            .putString(KEY_TRACK_ALBUM_ARTISTS_JSON, state.track?.albumArtists?.toArtistJsonArray()?.toString())
+            .putInt(KEY_TRACK_NUMBER, state.track?.trackNumber ?: -1)
+            .putInt(KEY_TRACK_DISC_NUMBER, state.track?.discNumber ?: -1)
+            .putInt(KEY_TRACK_RELEASE_YEAR, state.track?.releaseYear ?: -1)
+            .putString(KEY_TRACK_GENRE, state.track?.genre)
+            .putBoolean(KEY_TRACK_IS_LIKED, state.track?.isLiked == true)
+            .putBoolean(KEY_TRACK_HAS_IS_LIKED, state.track?.isLiked != null)
+            .putLong(KEY_POSITION_MS, state.positionMs.coerceAtLeast(0L))
+            .putBoolean(KEY_WAS_PLAYING, state.wasPlaying)
+            .putString(KEY_SCROBBLE_CLIENT_EVENT_ID, state.scrobbleClientEventId)
+            .putString(KEY_SCROBBLE_PLAYED_AT, state.scrobblePlayedAt)
+            .putLong(KEY_SCROBBLE_DURATION_PLAYED_MS, state.scrobbleDurationPlayedMs.coerceAtLeast(0L))
+    }
+
     private fun String?.toIdList(): List<String> {
         return orEmpty()
             .lineSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .toList()
+    }
+
+    private fun String?.toArtistList(): List<LibraryArtist> {
+        if (isNullOrBlank()) {
+            return emptyList()
+        }
+        return runCatching { JSONArray(this).artistValues() }.getOrDefault(emptyList())
     }
 
     private fun String?.toBooleanList(): List<Boolean> {
@@ -191,9 +215,11 @@ class PlaybackStateStore(context: Context) {
             .put("playCount", playCount)
             .put("artistId", artistId)
             .put("artistIds", JSONArray(artistIds))
+            .put("artists", artists.toArtistJsonArray())
             .put("albumId", albumId)
             .put("albumArtist", albumArtist)
             .put("albumArtistId", albumArtistId)
+            .put("albumArtists", albumArtists.toArtistJsonArray())
             .put("trackNumber", trackNumber)
             .put("discNumber", discNumber)
             .put("releaseYear", releaseYear)
@@ -218,9 +244,11 @@ class PlaybackStateStore(context: Context) {
             playCount = optInt("playCount", 0).coerceAtLeast(0),
             artistId = optString("artistId").takeIf { it.isNotBlank() },
             artistIds = optJSONArray("artistIds").stringValues(),
+            artists = optJSONArray("artists").artistValues(),
             albumId = optString("albumId").takeIf { it.isNotBlank() },
             albumArtist = optString("albumArtist").takeIf { it.isNotBlank() },
             albumArtistId = optString("albumArtistId").takeIf { it.isNotBlank() },
+            albumArtists = optJSONArray("albumArtists").artistValues(),
             trackNumber = optInt("trackNumber", -1).takeIf { it >= 0 },
             discNumber = optInt("discNumber", -1).takeIf { it >= 0 },
             releaseYear = optInt("releaseYear", -1).takeIf { it > 0 },
@@ -252,9 +280,11 @@ class PlaybackStateStore(context: Context) {
         const val KEY_TRACK_PLAY_COUNT = "track_play_count"
         const val KEY_TRACK_ARTIST_ID = "track_artist_id"
         const val KEY_TRACK_ARTIST_IDS = "track_artist_ids"
+        const val KEY_TRACK_ARTISTS_JSON = "track_artists_json"
         const val KEY_TRACK_ALBUM_ID = "track_album_id"
         const val KEY_TRACK_ALBUM_ARTIST = "track_album_artist"
         const val KEY_TRACK_ALBUM_ARTIST_ID = "track_album_artist_id"
+        const val KEY_TRACK_ALBUM_ARTISTS_JSON = "track_album_artists_json"
         const val KEY_TRACK_NUMBER = "track_number"
         const val KEY_TRACK_DISC_NUMBER = "track_disc_number"
         const val KEY_TRACK_RELEASE_YEAR = "track_release_year"
@@ -267,6 +297,34 @@ class PlaybackStateStore(context: Context) {
         const val KEY_SCROBBLE_PLAYED_AT = "scrobble_played_at"
         const val KEY_SCROBBLE_DURATION_PLAYED_MS = "scrobble_duration_played_ms"
     }
+}
+
+private fun List<LibraryArtist>.toArtistJsonArray(): JSONArray {
+    val array = JSONArray()
+    forEach { artist ->
+        array.put(
+            JSONObject()
+                .put("id", artist.id)
+                .put("name", artist.name),
+        )
+    }
+    return array
+}
+
+private fun JSONArray?.artistValues(): List<LibraryArtist> {
+    if (this == null) {
+        return emptyList()
+    }
+    val values = mutableListOf<LibraryArtist>()
+    for (index in 0 until length()) {
+        val item = optJSONObject(index) ?: continue
+        val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
+        values += LibraryArtist(
+            id = id,
+            name = item.optString("name").takeIf { it.isNotBlank() } ?: id,
+        )
+    }
+    return values.distinctBy { it.id }
 }
 
 private fun JSONArray?.stringValues(): List<String> {

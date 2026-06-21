@@ -1,11 +1,18 @@
 package dev.teacode.tmusic.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -17,8 +24,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -32,10 +41,26 @@ internal fun LyricsFullScreen(
     activeLyricIndex: Int,
     plainLyrics: String,
     listState: LazyListState,
+    lyricsLoading: Boolean,
     onRefreshLyrics: (() -> Unit)?,
     onSeek: (Int) -> Unit,
     onClose: () -> Unit,
 ) {
+    val refreshRotation = if (lyricsLoading) {
+        val refreshTransition = rememberInfiniteTransition(label = "Lyrics refresh")
+        val rotation by refreshTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "Lyrics refresh rotation",
+        )
+        rotation
+    } else {
+        0f
+    }
     Dialog(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -49,6 +74,9 @@ internal fun LyricsFullScreen(
                         Icon(
                             imageVector = Icons.Filled.Refresh,
                             contentDescription = "Refresh lyrics",
+                            modifier = Modifier.graphicsLayer {
+                                rotationZ = if (lyricsLoading) refreshRotation else 0f
+                            },
                         )
                     }
                 }
@@ -89,13 +117,13 @@ private fun ColumnScope.SyncedLyricsList(
                 text = line.text.ifBlank { "\u2022\u2022\u2022" },
                 style = if (active) {
                     MaterialTheme.typography.headlineSmall.copy(
-                        fontSize = 30.sp,
-                        lineHeight = 36.sp,
+                        fontSize = 27.sp,
+                        lineHeight = 33.sp,
                     )
                 } else {
                     MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 21.sp,
-                        lineHeight = 28.sp,
+                        fontSize = 19.sp,
+                        lineHeight = 26.sp,
                     )
                 },
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
@@ -107,6 +135,7 @@ private fun ColumnScope.SyncedLyricsList(
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = ScreenHorizontalPadding)
                     .clickable { onSeek((line.timeMs / 1000L).toInt().coerceAtLeast(0)) },
             )
         }
@@ -118,6 +147,7 @@ private fun ColumnScope.NoLyricsState() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = ScreenHorizontalPadding)
             .weight(1f),
         contentAlignment = Alignment.Center,
     ) {
@@ -142,8 +172,12 @@ private fun ColumnScope.PlainLyricsList(plainLyrics: String) {
         items(plainLyrics.lines()) { line ->
             Text(
                 text = line,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontSize = 20.sp,
+                    lineHeight = 28.sp,
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = ScreenHorizontalPadding),
             )
         }
     }

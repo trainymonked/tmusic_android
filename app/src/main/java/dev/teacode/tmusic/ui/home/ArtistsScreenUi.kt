@@ -1,9 +1,11 @@
 package dev.teacode.tmusic.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -46,28 +48,46 @@ fun ArtistsScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                HeaderBlock(title = "Artists", subtitle = "")
+                Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                    HeaderBlock(title = "Artists", subtitle = "")
+                }
             }
             if (!offlineNotice.isNullOrBlank()) {
-                item { OfflineNotice(offlineNotice) }
+                item {
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        OfflineNotice(offlineNotice)
+                    }
+                }
             }
             if (artists.isEmpty()) {
-                item { EmptyState("No artists loaded yet") }
+                item {
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        EmptyState("No artists loaded yet")
+                    }
+                }
             } else {
                 items(artists.chunked(3), key = { rowArtists -> rowArtists.joinToString("|") { it.id } }) { rowArtists ->
-                    ArtistGridRow(
-                        artists = rowArtists,
-                        artworkBitmaps = artworkBitmaps,
-                        onRequestArtwork = onRequestArtwork,
-                        onSelectArtist = onSelectArtist,
-                    )
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        ArtistGridRow(
+                            artists = rowArtists,
+                            artworkBitmaps = artworkBitmaps,
+                            onRequestArtwork = onRequestArtwork,
+                            onSelectArtist = onSelectArtist,
+                        )
+                    }
                 }
                 if (isLoadingMore) {
-                    item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                    item {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = ScreenHorizontalPadding),
+                        )
+                    }
                 }
             }
         }

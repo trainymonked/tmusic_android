@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.data
 
 import android.util.Log
+import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.ArtistSimilarity
 import dev.teacode.tmusic.domain.DownloadState
@@ -11,6 +12,7 @@ import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.LibraryArtistAlbums
 import dev.teacode.tmusic.domain.LibrarySearchResults
 import dev.teacode.tmusic.domain.Playlist
+import dev.teacode.tmusic.domain.RecentAlbumChange
 import dev.teacode.tmusic.domain.ScrobbleState
 import dev.teacode.tmusic.domain.Track
 import dev.teacode.tmusic.domain.TrackDownloadInfo
@@ -28,6 +30,8 @@ import kotlin.math.abs
 class TMusicApiException(
     val statusCode: Int?,
     message: String,
+    val code: String? = null,
+    val updateInfo: AppUpdateInfo? = null,
 ) : Exception(message)
 
 data class PlaylistPayload(
@@ -42,6 +46,7 @@ data class LibraryArtistsPage(
 
 private const val ARTWORK_SIZE_PX = 1200
 private const val API_LOG_TAG = "TMusicApi"
+private const val HTTP_UPGRADE_REQUIRED = 426
 
 class TMusicApiClient(
     initialBaseUrl: String,
@@ -49,10 +54,6 @@ class TMusicApiClient(
 ) {
     @Volatile
     private var baseUrl: String = initialBaseUrl.trimEnd('/')
-
-    fun baseUrl(): String {
-        return baseUrl
-    }
 
     fun setBaseUrl(nextBaseUrl: String) {
         baseUrl = nextBaseUrl.trimEnd('/')
@@ -95,6 +96,19 @@ class TMusicApiClient(
         return user.toAccount()
     }
 
+    suspend fun appUpdateConfig(): AppUpdateInfo? {
+        val body = request(
+            method = "GET",
+            path = "/app/config",
+            authenticated = true,
+        ).trim()
+        if (body.isBlank()) {
+            return null
+        }
+
+        return JSONObject(body).payloadObject().appUpdateInfoOrNull()
+    }
+
     suspend fun logout() = withContext(Dispatchers.IO) {
         val tokens = sessionStore.tokens() ?: return@withContext
         val body = JSONObject()
@@ -110,6 +124,8 @@ class TMusicApiClient(
             throw TMusicApiException(
                 statusCode = response.statusCode,
                 message = response.errorMessage(),
+                code = response.errorCode(),
+                updateInfo = response.appUpdateInfoOrNull(),
             )
         }
     }
@@ -343,6 +359,19 @@ class TMusicApiClient(
         ).distinctBy { it.id }
     }
 
+    suspend fun recentAlbums(
+        limit: Int = 10,
+        offset: Int = 0,
+    ): List<LibraryAlbum> {
+        val safeLimit = limit.coerceIn(1, LIBRARY_PAGE_LIMIT)
+        val body = request(
+            method = "GET",
+            path = "/library/albums/recent?limit=$safeLimit&offset=${offset.coerceAtLeast(0)}",
+            authenticated = true,
+        )
+        return body.toLibraryAlbums().distinctBy { it.id }
+    }
+
     suspend fun libraryArtistAlbums(artistId: String): LibraryArtistAlbums {
         val albums = linkedMapOf<String, LibraryAlbum>()
         val appearsOn = linkedMapOf<String, LibraryAlbum>()
@@ -414,8 +443,8 @@ class TMusicApiClient(
         return pagedList(
             path = "/library/me/albums",
             limit = LIBRARY_PAGE_LIMIT,
-            parse = String::toLibraryAlbums,
-        ).distinctBy { it.id }.map { it.copy(savedByCurrentUser = true) }
+            parse = String::toSavedLibraryAlbums,
+        ).distinctBy { it.id }
     }
 
     suspend fun savedAlbumsPage(
@@ -426,8 +455,8 @@ class TMusicApiClient(
             path = "/library/me/albums",
             limit = limit.coerceIn(1, LIBRARY_PAGE_LIMIT),
             offset = offset,
-            parse = String::toLibraryAlbums,
-        ).distinctBy { it.id }.map { it.copy(savedByCurrentUser = true) }
+            parse = String::toSavedLibraryAlbums,
+        ).distinctBy { it.id }
     }
 
     suspend fun saveAlbum(albumId: String): LibraryAlbum? {
@@ -479,19 +508,19 @@ class TMusicApiClient(
         ).distinctBy { it.id }
     }
 
-    suspend fun librarySearch(query: String, limit: Int): LibrarySearchResults {
+    suspend fun librarySearch(query: String, limit: Int, offset: Int = 0): LibrarySearchResults {
         val safeLimit = limit.coerceIn(1, TRACK_SEARCH_PAGE_LIMIT)
-        val tracks = tracks(query = query, limit = safeLimit, offset = 0)
-        val libraryResults = runCatching {
+        val safeOffset = offset.coerceAtLeast(0)
+        return runCatching {
             val body = request(
                 method = "GET",
-                path = "/library/search?q=${query.queryValue()}&limit=$safeLimit",
+                path = "/library/search?q=${query.queryValue()}" +
+                    "&artistLimit=5&albumLimit=5&playlistLimit=5" +
+                    "&trackLimit=$safeLimit&trackOffset=$safeOffset",
                 authenticated = true,
             )
             body.toLibrarySearchResults()
         }.getOrDefault(LibrarySearchResults(emptyList(), emptyList(), emptyList()))
-
-        return libraryResults.copy(tracks = tracks)
     }
 
     suspend fun tracks(): List<Track> {
@@ -502,14 +531,25 @@ class TMusicApiClient(
         ).distinctBy { it.id }
     }
 
-    suspend fun recentTracks(limit: Int = 50): List<Track> {
+    suspend fun recentTracks(limit: Int = 50, offset: Int = 0): List<Track> {
         val safeLimit = limit.coerceIn(1, TRACK_CATALOG_PAGE_LIMIT)
         val body = request(
             method = "GET",
-            path = "/tracks/recent?limit=$safeLimit&offset=0",
+            path = "/tracks/recent?limit=$safeLimit&offset=${offset.coerceAtLeast(0)}",
             authenticated = true,
         )
         return body.toTracks().distinctBy { it.id }
+    }
+
+    suspend fun track(trackId: String): Track {
+        val body = request(
+            method = "GET",
+            path = "/tracks/${trackId.pathSegment()}",
+            authenticated = true,
+        )
+        val root = JSONObject(body).payloadObject()
+        val trackJson = root.optJSONObject("track") ?: root
+        return trackJson.toTrack(accentColor = stableAccentColorFor(trackJson.stableId("track")))
     }
 
     suspend fun tracksCount(): Int {
@@ -520,16 +560,6 @@ class TMusicApiClient(
         )
         val root = JSONObject(body).payloadObject()
         return root.optionalInt("count") ?: 0
-    }
-
-    private suspend fun tracks(query: String, limit: Int, offset: Int): List<Track> {
-        val body = request(
-            method = "GET",
-            path = "/tracks?q=${query.queryValue()}&limit=${limit.coerceAtLeast(1)}&offset=${offset.coerceAtLeast(0)}",
-            authenticated = true,
-        )
-
-        return body.toTracks().distinctBy { it.id }
     }
 
     suspend fun streamUrl(trackId: String): String {
@@ -576,6 +606,7 @@ class TMusicApiClient(
                 method = "POST",
                 path = "/tracks/${trackId.pathSegment()}/lyrics/refresh",
                 authenticated = true,
+                readTimeoutMs = LYRICS_REFRESH_READ_TIMEOUT_MS,
             ).trim()
         }.getOrElse { error ->
             if (error is TMusicApiException && error.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
@@ -676,6 +707,26 @@ class TMusicApiClient(
         val responseBody = request(
             method = "PUT",
             path = "/playlists/${playlistId.pathSegment()}/tracks/reorder",
+            body = body,
+            authenticated = true,
+        ).trim()
+
+        if (responseBody.isBlank()) {
+            return null
+        }
+
+        val root = JSONObject(responseBody).payloadObject()
+        val playlist = root.optJSONObject("playlist") ?: root
+        return playlist.toPlaylist()
+    }
+
+    suspend fun movePlaylistTrack(playlistId: String, playlistTrackId: String, position: Int): Playlist? {
+        val body = JSONObject()
+            .put("position", position.coerceAtLeast(1))
+            .toString()
+        val responseBody = request(
+            method = "PATCH",
+            path = "/playlists/${playlistId.pathSegment()}/tracks/${playlistTrackId.pathSegment()}",
             body = body,
             authenticated = true,
         ).trim()
@@ -1009,6 +1060,7 @@ class TMusicApiClient(
         path: String,
         body: String? = null,
         authenticated: Boolean,
+        readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): String = withContext(Dispatchers.IO) {
         val requestLabel = "$method ${baseUrl + path}"
         Log.d(
@@ -1027,6 +1079,7 @@ class TMusicApiClient(
             path = path,
             body = body,
             accessToken = firstToken,
+            readTimeoutMs = readTimeoutMs,
         )
 
         if (authenticated && response.statusCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
@@ -1037,17 +1090,20 @@ class TMusicApiClient(
                 path = path,
                 body = body,
                 accessToken = sessionStore.tokens()?.accessToken,
+                readTimeoutMs = readTimeoutMs,
             )
         }
 
         if (response.statusCode !in 200..299) {
-            Log.w(
+            Log.e(
                 API_LOG_TAG,
                 "$requestLabel -> HTTP ${response.statusCode}: ${response.body.sanitizedForLog().take(400)}",
             )
             throw TMusicApiException(
                 statusCode = response.statusCode,
                 message = response.errorMessage(),
+                code = response.errorCode(),
+                updateInfo = response.appUpdateInfoOrNull(),
             )
         }
 
@@ -1081,6 +1137,9 @@ class TMusicApiClient(
             accessToken = root.requireString("accessToken"),
             refreshToken = root.optionalString("refreshToken") ?: currentTokens.refreshToken,
         )
+        (root.optJSONObject("user") ?: root.optJSONObject("account"))?.let { user ->
+            sessionStore.saveAccount(user.toAccount())
+        }
     }
 
     private fun execute(
@@ -1088,13 +1147,17 @@ class TMusicApiClient(
         path: String,
         body: String?,
         accessToken: String?,
+        readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): ApiResponse {
         val url = baseUrl + path
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
+            readTimeout = readTimeoutMs
             setRequestProperty("Accept", "application/json")
+            setRequestProperty("X-TMusic-Platform", "android")
+            setRequestProperty("X-TMusic-Version-Code", BuildConfig.VERSION_CODE.toString())
+            setRequestProperty("X-TMusic-Version-Name", BuildConfig.VERSION_NAME)
             accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
 
             if (body != null) {
@@ -1128,6 +1191,7 @@ class TMusicApiClient(
     private companion object {
         const val CONNECT_TIMEOUT_MS = 5_000
         const val READ_TIMEOUT_MS = 8_000
+        const val LYRICS_REFRESH_READ_TIMEOUT_MS = 120_000
         const val LIBRARY_PAGE_LIMIT = 50
         const val PLAYLIST_PAGE_LIMIT = 50
         const val PLAYLIST_TRACK_PAGE_LIMIT = 50
@@ -1158,6 +1222,9 @@ private data class ApiResponse(
     val body: String,
 ) {
     fun errorMessage(): String {
+        if (statusCode == HTTP_UPGRADE_REQUIRED || errorCode().equals("APP_UPDATE_REQUIRED", ignoreCase = true)) {
+            return "App update required to continue."
+        }
         if (body.isBlank()) {
             return "Request failed with HTTP $statusCode."
         }
@@ -1168,6 +1235,26 @@ private data class ApiResponse(
         }.getOrElse {
             body
         }
+    }
+
+    fun errorCode(): String? {
+        if (body.isBlank()) {
+            return null
+        }
+
+        return runCatching {
+            JSONObject(body).optionalString("code", "errorCode")
+        }.getOrNull()
+    }
+
+    fun appUpdateInfoOrNull(): AppUpdateInfo? {
+        if (body.isBlank()) {
+            return null
+        }
+
+        return runCatching {
+            JSONObject(body).payloadObject().appUpdateInfoOrNull(statusCode = statusCode)
+        }.getOrNull()
     }
 }
 
@@ -1186,6 +1273,39 @@ private fun JSONObject.requireString(name: String): String {
     val value = optString(name)
     if (value.isBlank()) {
         throw TMusicApiException(null, "The response does not contain $name.")
+    }
+    return value
+}
+
+private fun JSONObject.expectedStringOrLog(name: String, context: String): String? {
+    val value = optionalString(name)
+    if (value == null) {
+        Log.e(
+            API_LOG_TAG,
+            "$context is missing expected JSON field '$name': " +
+                toString().sanitizedForLog().take(800),
+        )
+    }
+    return value
+}
+
+private fun JSONObject.expectedBooleanOrLog(name: String, context: String): Boolean? {
+    if (!has(name) || isNull(name)) {
+        Log.e(
+            API_LOG_TAG,
+            "$context is missing expected JSON field '$name': " +
+                toString().sanitizedForLog().take(800),
+        )
+        return null
+    }
+    val value = opt(name)
+    if (value !is Boolean) {
+        Log.e(
+            API_LOG_TAG,
+            "$context has non-boolean JSON field '$name': " +
+                toString().sanitizedForLog().take(800),
+        )
+        return null
     }
     return value
 }
@@ -1251,6 +1371,59 @@ private fun JSONObject.optionalBoolean(vararg names: String): Boolean? {
         }
     }
     return null
+}
+
+private fun JSONObject.appUpdateInfoOrNull(statusCode: Int? = null): AppUpdateInfo? {
+    val update = optJSONObject("update")
+        ?: optJSONObject("appUpdate")
+        ?: optJSONObject("app_update")
+        ?: this
+    val code = optionalString("code", "errorCode")
+    val latestVersionCode = update.optionalInt("latestVersionCode", "latestCode")
+    val minSupportedVersionCode = update.optionalInt(
+        "forcedMinVersionCode",
+        "minSupportedVersionCode",
+        "minimumSupportedVersionCode",
+        "minCode",
+    )
+    val forceUpdate = update.optionalBoolean("forceUpdate", "required") == true ||
+        statusCode == HTTP_UPGRADE_REQUIRED ||
+        code.equals("APP_UPDATE_REQUIRED", ignoreCase = true)
+    val version = update.optionalString("version", "versionName", "latestVersionName")
+        ?: latestVersionCode?.toString()
+        ?: minSupportedVersionCode?.takeIf { forceUpdate }?.let { "min-$it" }
+        ?: BuildConfig.VERSION_NAME.takeIf { forceUpdate }
+        ?: return null
+    val available = update.optionalBoolean("available") ?: (
+        forceUpdate ||
+            minSupportedVersionCode?.let { BuildConfig.VERSION_CODE < it } == true ||
+            if (latestVersionCode != null) {
+                latestVersionCode > BuildConfig.VERSION_CODE
+            } else {
+                isAppVersionNewer(version, BuildConfig.VERSION_NAME)
+            }
+        )
+    if (!available && !forceUpdate) {
+        return null
+    }
+
+    val updateUrl = update.optionalString("updateUrl", "downloadUrl", "url", "pageUrl").orEmpty()
+    val message = update.optionalString("message", "changelog", "releaseNotes").orEmpty()
+    return AppUpdateInfo(
+        version = version,
+        title = update.optionalString("title")
+            ?: if (forceUpdate) "Update required" else "Update available",
+        changelog = message,
+        pageUrl = update.optionalString("pageUrl", "htmlUrl").orEmpty().ifBlank { updateUrl },
+        downloadUrl = updateUrl,
+        releaseNotesUrl = update.optionalString("releaseNotesUrl", "changelogUrl", "notesUrl").orEmpty(),
+        minSupportedVersionCode = minSupportedVersionCode,
+        latestVersionCode = latestVersionCode,
+        forceUpdate = forceUpdate,
+        blockingScopes = update.optJSONArray("blockingScopes")
+            ?.stringValues()
+            .orEmpty(),
+    )
 }
 
 private fun JSONObject.paginationTotalCount(): Int? {
@@ -1430,6 +1603,56 @@ private fun JSONObject.artistNameList(): List<String> {
         .distinctBy { it.lowercase() }
 }
 
+private fun JSONObject.artistReferenceList(vararg arrayNames: String): List<LibraryArtist> {
+    return arrayNames
+        .mapNotNull(::optJSONArray)
+        .flatMap { array ->
+            buildList {
+                for (index in 0 until array.length()) {
+                    val value = array.opt(index)
+                    val entity = when (value) {
+                        is JSONObject -> value.optJSONObject("artist")
+                            ?: value.optJSONObject("artistEntity")
+                            ?: value.optJSONObject("albumArtist")
+                            ?: value.optJSONObject("trackArtist")
+                            ?: value
+                        else -> null
+                    }
+                    val id = entity?.optionalString("id", "_id", "artistId")
+                    if (id.isNullOrBlank()) {
+                        continue
+                    }
+                    add(
+                        LibraryArtist(
+                            id = id,
+                            name = entity.optionalString("name", "title", "artist", "artistName") ?: id,
+                        ),
+                    )
+                }
+            }
+        }
+        .distinctBy { it.id }
+}
+
+private fun artistReferencesFromIdsAndNames(
+    ids: List<String>,
+    names: List<String>,
+): List<LibraryArtist> {
+    val cleanNames = names
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+    return ids
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .mapIndexed { index, id ->
+            LibraryArtist(
+                id = id,
+                name = cleanNames.getOrNull(index) ?: cleanNames.firstOrNull() ?: id,
+            )
+        }
+}
+
 private fun JSONObject.albumArtistId(): String? {
     val albumEntity = optJSONObject("albumEntity")
         ?: optJSONObject("album")
@@ -1457,6 +1680,7 @@ private fun JSONObject.toAccount(): Account {
         email = email,
         avatarUrl = optionalString("avatarUrl", "avatar", "picture", "photoUrl", "imageUrl"),
         lastFmConnection = accountLastFmConnection(),
+        canPlayMedia = optionalBoolean("canPlayMedia", "can_play_media") ?: true,
     )
 }
 
@@ -1489,6 +1713,7 @@ private fun JSONObject.toPlaylist(): Playlist {
             optionalString("type", "kind", "systemKey")?.equals("favorites", ignoreCase = true) == true,
         trackCount = trackCount.coerceAtLeast(trackIds.size),
         totalDurationSeconds = totalDurationSeconds(),
+        updatedAt = expectedStringOrLog("updatedAt", "Playlist $id"),
     )
 }
 
@@ -1593,10 +1818,38 @@ private fun JSONObject.toTrack(accentColor: Long): Track {
         ?: optJSONObject("album")
         ?: optJSONObject("albumDto")
         ?: optJSONObject("albumObject")
-    val artistIds = artistIdList()
-    val artistNames = artistNameList()
-    val albumArtistNames = albumEntity?.artistNameList().orEmpty()
-    val albumArtistIds = albumEntity?.artistIdList().orEmpty()
+    val rawTrackArtistReferences = artistReferenceList("artists", "trackArtists", "artistEntities", "trackArtistEntities")
+    val rawAlbumArtistReferences = (
+        artistReferenceList("albumArtists", "albumArtistEntities", "primaryArtists", "primaryArtistEntities") +
+            albumEntity?.artistReferenceList(
+                "artists",
+                "albumArtists",
+                "artistEntities",
+                "albumArtistEntities",
+                "primaryArtists",
+                "primaryArtistEntities",
+            ).orEmpty()
+        ).distinctBy { it.id }
+    val artistIds = (rawTrackArtistReferences.map { it.id } + artistIdList()).distinct()
+    val artistNames = (rawTrackArtistReferences.map { it.name } + artistNameList())
+        .distinctBy { it.lowercase() }
+    val albumArtistNames = (
+        rawAlbumArtistReferences.map { it.name } +
+            listOfNotNull(optionalString("albumArtist")) +
+            albumEntity?.artistNameList().orEmpty()
+        )
+        .distinctBy { it.lowercase() }
+    val albumArtistIds = (
+        rawAlbumArtistReferences.map { it.id } +
+            listOfNotNull(optionalString("albumArtistId")) +
+            albumEntity?.artistIdList().orEmpty()
+        ).distinct()
+    val trackArtistReferences = rawTrackArtistReferences.ifEmpty {
+        artistReferencesFromIdsAndNames(artistIds, artistNames)
+    }
+    val albumArtistReferences = rawAlbumArtistReferences.ifEmpty {
+        artistReferencesFromIdsAndNames(albumArtistIds, albumArtistNames)
+    }
     return Track(
         id = id,
         title = optionalString("title", "name") ?: "Untitled track",
@@ -1614,17 +1867,20 @@ private fun JSONObject.toTrack(accentColor: Long): Track {
         playCount = optInt("playCount", 0),
         artistId = artistIds.firstOrNull(),
         artistIds = artistIds,
+        artists = trackArtistReferences,
         albumId = optionalString("albumId") ?: albumEntity?.optionalString("id", "_id", "albumId"),
         albumArtist = albumEntity?.optionalString("artist", "artistName")
             ?: albumArtistNames.joinToString("; ").takeIf { it.isNotBlank() }
             ?: optionalString("albumArtist"),
         albumArtistId = albumArtistId() ?: albumArtistIds.firstOrNull(),
+        albumArtists = albumArtistReferences,
         trackNumber = optionalInt("trackNumber", "position", "discTrackNumber"),
         discNumber = optionalInt("discNumber"),
         releaseYear = optionalInt("releaseYear", "year")
             ?: albumEntity?.optionalInt("releaseYear", "year"),
         genre = optionalString("genre"),
         isLiked = optionalBoolean("isLiked", "liked", "isFavorite", "favorite"),
+        foundInLyrics = optionalBoolean("foundInLyrics") == true,
     )
 }
 
@@ -1690,12 +1946,34 @@ private fun JSONObject.toArtistSimilarity(): ArtistSimilarity? {
     )
 }
 
+private fun JSONObject.toRecentAlbumChange(): RecentAlbumChange? {
+    val type = optionalString("type", "recentChangeType") ?: return null
+    return RecentAlbumChange(
+        type = type,
+        latestTrackCreatedAt = optionalString("latestTrackCreatedAt"),
+        latestTrackUpdatedAt = optionalString("latestTrackUpdatedAt"),
+    )
+}
+
 private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
     val id = stableId("album")
     val title = optionalString("title", "name", "albumTitle") ?: return null
-    val artistNames = artistNameList()
-    val artistIds = artistIdList()
+    val rawArtistReferences = artistReferenceList(
+        "artists",
+        "albumArtists",
+        "artistEntities",
+        "albumArtistEntities",
+        "primaryArtists",
+        "primaryArtistEntities",
+    )
+    val artistIds = (rawArtistReferences.map { it.id } + artistIdList()).distinct()
+    val artistNames = (rawArtistReferences.map { it.name } + artistNameList())
+        .distinctBy { it.lowercase() }
+    val artistReferences = rawArtistReferences.ifEmpty {
+        artistReferencesFromIdsAndNames(artistIds, artistNames)
+    }
     val artist = optionalString("artist", "artistName", "albumArtist")
+        ?: artistReferences.joinToString("; ") { it.name }.takeIf { it.isNotBlank() }
         ?: artistNames.joinToString("; ").takeIf { it.isNotBlank() }
         ?: optJSONObject("artistEntity")?.optionalString("name", "title")
         ?: "Unknown artist"
@@ -1706,14 +1984,18 @@ private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
         ?: optJSONObject("albumArtistEntity")?.optionalString("id", "_id", "artistId")
         ?: optJSONObject("primaryArtist")?.optionalString("id", "_id", "artistId")
         ?: optJSONObject("primaryArtistEntity")?.optionalString("id", "_id", "artistId")
+        ?: artistReferences.firstOrNull()?.id
         ?: artistIds.firstOrNull()
     val count = optJSONObject("_count")
+    val recentChange = optJSONObject("recentChange")?.toRecentAlbumChange()
+    val recentChangeType = optionalString("recentChangeType") ?: recentChange?.type
     return LibraryAlbum(
         id = id,
         title = title,
         artist = artist,
         artistId = artistId,
         artistIds = artistIds,
+        artists = artistReferences,
         releaseYear = optionalInt("releaseYear", "year"),
         genre = optionalString("genre"),
         trackCount = optionalInt("trackCount", "tracksCount")
@@ -1731,6 +2013,10 @@ private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
         hasArtwork = hasArtworkMetadata(),
         totalDurationSeconds = totalDurationSeconds(),
+        recentChangeType = recentChangeType,
+        isNewAlbum = optBoolean("isNewAlbum", false) ||
+            recentChangeType.equals("new", ignoreCase = true),
+        recentChange = recentChange,
     )
 }
 
@@ -1977,6 +2263,11 @@ private fun String.toLibraryAlbums(): List<LibraryAlbum> {
     return values.mapNotNull { it.toLibraryAlbumValue() }.distinctBy { it.id }
 }
 
+private fun String.toSavedLibraryAlbums(): List<LibraryAlbum> {
+    val values = jsonValues(arrayKey = "albums", objectKey = "album")
+    return values.mapNotNull { it.toSavedLibraryAlbumValue() }.distinctBy { it.id }
+}
+
 private fun String.toLibraryArtistAlbums(): LibraryArtistAlbums {
     val trimmed = trim()
     if (trimmed.isBlank()) {
@@ -2028,11 +2319,45 @@ private fun Any.toLibraryAlbumValue(): LibraryAlbum? {
     }
 }
 
-private fun Any.toTrackValue(): Track? {
+private fun Any.toSavedLibraryAlbumValue(): LibraryAlbum? {
+    val value = this as? JSONObject ?: return null
+    val albumJson = value.optJSONObject("album")
+    if (albumJson == null) {
+        Log.e(
+            API_LOG_TAG,
+            "UserAlbum payload is missing expected JSON field 'album': " +
+                value.toString().sanitizedForLog().take(800),
+        )
+        return null
+    }
+
+    val parsedAlbum = albumJson.toLibraryAlbum() ?: return null
+    return parsedAlbum.copy(
+        savedByCurrentUser = true,
+        userAlbumCreatedAt = value.expectedStringOrLog("createdAt", "UserAlbum ${parsedAlbum.id}"),
+    )
+}
+
+private fun Any.toTrackValue(
+    requiredFoundInLyrics: Boolean = false,
+    context: String = "Track",
+): Track? {
     val value = this as? JSONObject ?: return null
     val trackJson = value.optJSONObject("track") ?: value
     val id = trackJson.stableId("track")
-    return trackJson.toTrack(accentColor = stableAccentColorFor(id))
+    val track = trackJson.toTrack(accentColor = stableAccentColorFor(id))
+    if (!requiredFoundInLyrics) {
+        return track
+    }
+    val foundInLyrics = when {
+        trackJson.has("foundInLyrics") -> trackJson.expectedBooleanOrLog("foundInLyrics", "$context $id")
+        value.has("foundInLyrics") -> value.expectedBooleanOrLog("foundInLyrics", "$context $id")
+        else -> {
+            trackJson.expectedBooleanOrLog("foundInLyrics", "$context $id")
+            null
+        }
+    }
+    return foundInLyrics?.let { track.copy(foundInLyrics = it) } ?: track
 }
 
 private fun String.toLibraryAlbumPayload(): LibraryAlbum? {
@@ -2046,10 +2371,16 @@ private fun String.toLibraryAlbumPayload(): LibraryAlbum? {
         ?: root.optJSONObject("data")
         ?: root
     return album.toLibraryAlbum()?.let { parsedAlbum ->
+        val userAlbumCreatedAt = root.optJSONObject("album")?.let {
+            root.expectedStringOrLog("createdAt", "UserAlbum ${parsedAlbum.id}")
+        }
         if (root.has("savedByCurrentUser")) {
-            parsedAlbum.copy(savedByCurrentUser = root.optBoolean("savedByCurrentUser", parsedAlbum.savedByCurrentUser))
+            parsedAlbum.copy(
+                savedByCurrentUser = root.optBoolean("savedByCurrentUser", parsedAlbum.savedByCurrentUser),
+                userAlbumCreatedAt = userAlbumCreatedAt,
+            )
         } else {
-            parsedAlbum
+            parsedAlbum.copy(userAlbumCreatedAt = userAlbumCreatedAt)
         }
     }
 }
@@ -2076,7 +2407,10 @@ private fun String.toLibrarySearchResults(): LibrarySearchResults {
     val tracks = root.optJSONArray("tracks")
         ?.jsonObjects()
         ?.map { json ->
-            json.toTrackValue()
+            json.toTrackValue(
+                requiredFoundInLyrics = true,
+                context = "LibrarySearch track",
+            )
         }
         ?.filterNotNull()
         .orEmpty()
@@ -2086,7 +2420,7 @@ private fun String.toLibrarySearchResults(): LibrarySearchResults {
         .orEmpty()
 
     return LibrarySearchResults(
-        artists = artists.distinctBy { it.name.lowercase() },
+        artists = artists.distinctBy { it.id },
         albums = albums.distinctBy { it.id },
         tracks = tracks.distinctBy { it.id },
         playlists = playlists.distinctBy { it.id },
@@ -2153,6 +2487,14 @@ private fun JSONArray.jsonValues(): List<Any> {
     val values = mutableListOf<Any>()
     for (index in 0 until length()) {
         values += get(index)
+    }
+    return values
+}
+
+private fun JSONArray.stringValues(): List<String> {
+    val values = mutableListOf<String>()
+    for (index in 0 until length()) {
+        optString(index).takeIf { it.isNotBlank() }?.let(values::add)
     }
     return values
 }

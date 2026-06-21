@@ -31,12 +31,12 @@ class RemoteAuthRepository(
         return sessionStore.tokens()?.accessToken
     }
 
-    fun apiBaseUrl(): String {
-        return apiClient.baseUrl()
-    }
-
     fun setApiBaseUrl(baseUrl: String) {
         apiClient.setBaseUrl(baseUrl)
+    }
+
+    suspend fun appUpdateConfig(): AppUpdateInfo? {
+        return apiClient.appUpdateConfig()
     }
 
     override suspend fun signInWithGoogle(idToken: String): Result<Account> {
@@ -129,6 +129,10 @@ class RemoteMusicRepository(
         return apiClient.libraryAlbumsPage(limit = limit, offset = offset)
     }
 
+    suspend fun recentAlbums(limit: Int = 10, offset: Int = 0): List<LibraryAlbum> {
+        return apiClient.recentAlbums(limit = limit, offset = offset)
+    }
+
     override suspend fun libraryArtistAlbums(artistId: String): LibraryArtistAlbums {
         val result = apiClient.libraryArtistAlbums(artistId)
         return result.copy(tracks = withOfflineState(result.tracks))
@@ -170,8 +174,8 @@ class RemoteMusicRepository(
         return withOfflineState(apiClient.albumTracksPage(albumId = albumId, limit = limit, offset = offset))
     }
 
-    override suspend fun search(query: String, limit: Int): LibrarySearchResults {
-        val results = apiClient.librarySearch(query, limit)
+    override suspend fun search(query: String, limit: Int, offset: Int): LibrarySearchResults {
+        val results = apiClient.librarySearch(query, limit, offset)
         return results.copy(tracks = withOfflineState(results.tracks))
     }
 
@@ -187,8 +191,12 @@ class RemoteMusicRepository(
         return withOfflineState(apiClient.tracks())
     }
 
-    suspend fun recentTracks(limit: Int = 50): List<Track> {
-        return withOfflineState(apiClient.recentTracks(limit = limit))
+    suspend fun recentTracks(limit: Int = 50, offset: Int = 0): List<Track> {
+        return withOfflineState(apiClient.recentTracks(limit = limit, offset = offset))
+    }
+
+    suspend fun track(trackId: String): Track {
+        return withOfflineState(listOf(apiClient.track(trackId))).first()
     }
 
     suspend fun tracksCount(): Int {
@@ -290,6 +298,10 @@ class RemoteMusicRepository(
         offlineTrackStore.clearCache()
     }
 
+    suspend fun clearMusicCache(retainedTrackIds: Set<String>) {
+        offlineTrackStore.clearCacheExcept(retainedTrackIds)
+    }
+
     override suspend fun artworkUrl(trackId: String): String {
         return apiClient.artworkUrl(trackId)
     }
@@ -339,6 +351,18 @@ class RemoteMusicRepository(
         return apiClient.reorderPlaylistTracks(
             playlistId = playlistId,
             playlistTrackIds = playlistTrackIds,
+        )
+    }
+
+    override suspend fun movePlaylistTrack(
+        playlistId: String,
+        playlistTrackId: String,
+        position: Int,
+    ): Playlist? {
+        return apiClient.movePlaylistTrack(
+            playlistId = playlistId,
+            playlistTrackId = playlistTrackId,
+            position = position,
         )
     }
 

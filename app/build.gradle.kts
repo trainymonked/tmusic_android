@@ -13,12 +13,16 @@ android {
         }
     }
 
+    buildFeatures {
+        resValues = true
+    }
+
     defaultConfig {
         applicationId = "dev.teacode.tmusic"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -38,9 +42,27 @@ android {
                 .get()
                 .gradleStringLiteral(),
         )
+        buildConfigField(
+            "String",
+            "GITHUB_RELEASES_REPOSITORY",
+            providers.gradleProperty("GITHUB_RELEASES_REPOSITORY")
+                .orElse("trainymonked/tmusic_android")
+                .get()
+                .gradleStringLiteral(),
+        )
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+
+            resValue(
+                type = "string",
+                name = "app_name",
+                value = "T-Music Debug"
+            )
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

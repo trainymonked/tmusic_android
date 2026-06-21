@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -33,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.domain.Track
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -79,14 +82,9 @@ fun MiniPlayer(
     onTogglePlayback: () -> Unit,
 ) {
     val track = playerState.currentTrack ?: return
+    var displayedArtworkTrackId by remember { mutableStateOf(track.id) }
     var displayedArtworkBitmap by remember { mutableStateOf(artworkBitmap) }
-    var displayedVisualState by remember {
-        mutableStateOf(MiniPlayerVisualState(track = track))
-    }
     var incomingVisualState by remember { mutableStateOf<MiniPlayerVisualState?>(null) }
-    var displayedPreviousTrack by remember { mutableStateOf(previousTrack) }
-    var displayedNextTrack by remember { mutableStateOf(nextTrack) }
-    var displayedQueueGeneration by remember { mutableStateOf(queueGeneration) }
     var activeTransitionDirection by remember { mutableStateOf(1) }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
@@ -95,69 +93,17 @@ fun MiniPlayer(
     var transitionAnimating by remember { mutableStateOf(false) }
     val transitionOffsetX = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
+    val currentTrackIdState = rememberUpdatedState(track.id)
     val swipeThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
     val gestureLockThresholdPx = with(LocalDensity.current) { 8.dp.toPx() }
     val visualState = MiniPlayerVisualState(track = track)
 
-    LaunchedEffect(artworkBitmap) {
-        if (artworkBitmap != null) {
+    LaunchedEffect(track.id, artworkBitmap) {
+        if (displayedArtworkTrackId != track.id) {
+            displayedArtworkTrackId = track.id
             displayedArtworkBitmap = artworkBitmap
-        }
-    }
-
-    LaunchedEffect(track.id, queueGeneration) {
-        if (displayedVisualState.track.id == track.id) {
-            displayedQueueGeneration = queueGeneration
-            return@LaunchedEffect
-        }
-        val queueDirection = if (displayedQueueGeneration != queueGeneration) {
-            0
-        } else {
-            when (track.id) {
-                displayedNextTrack?.id -> 1
-                displayedPreviousTrack?.id -> -1
-                else -> 0
-            }
-        }
-        if (queueDirection == 0) {
-            transitionOffsetX.snapTo(0f)
-            dragX = 0f
-            dragAxis = MiniPlayerDragAxis.Undetermined
-            incomingVisualState = null
-            displayedVisualState = visualState
-            displayedPreviousTrack = previousTrack
-            displayedNextTrack = nextTrack
-            displayedQueueGeneration = queueGeneration
-            transitionAnimating = false
-            return@LaunchedEffect
-        }
-        activeTransitionDirection = queueDirection
-        transitionAnimating = true
-        transitionOffsetX.snapTo(dragX.coerceIn(-contentWidthPx, contentWidthPx))
-        dragX = 0f
-        dragAxis = MiniPlayerDragAxis.Undetermined
-        incomingVisualState = visualState
-        transitionOffsetX.animateTo(
-            targetValue = -queueDirection * contentWidthPx,
-            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-        )
-        displayedVisualState = visualState
-        incomingVisualState = null
-        transitionOffsetX.snapTo(0f)
-        displayedPreviousTrack = previousTrack
-        displayedNextTrack = nextTrack
-        displayedQueueGeneration = queueGeneration
-        transitionAnimating = false
-    }
-
-    LaunchedEffect(track.id, displayedArtworkBitmap, previousTrack, nextTrack) {
-        when {
-            incomingVisualState?.track?.id == track.id -> incomingVisualState = visualState
-            !transitionAnimating && displayedVisualState.track.id == track.id -> {
-                displayedVisualState = visualState
-                displayedPreviousTrack = previousTrack
-                displayedNextTrack = nextTrack
-            }
+        } else if (artworkBitmap != null) {
+            displayedArtworkBitmap = artworkBitmap
         }
     }
 
@@ -176,36 +122,103 @@ fun MiniPlayer(
         }
     }
 
+    fun animateSwipeComplete(
+        startOffset: Float,
+        direction: Int,
+        targetTrack: Track,
+        onComplete: () -> Unit,
+    ) {
+        scope.launch {
+            logPlaybackDebug(
+                "mini swipe complete direction=$direction startOffset=$startOffset " +
+                    "current=${track.debugTrack()} target=${targetTrack.debugTrack()} " +
+                    "previous=${previousTrack?.debugTrack()} next=${nextTrack?.debugTrack()}",
+            )
+            activeTransitionDirection = direction
+            incomingVisualState = MiniPlayerVisualState(targetTrack)
+            transitionAnimating = true
+            transitionOffsetX.snapTo(startOffset.coerceIn(-contentWidthPx, contentWidthPx))
+            dragX = 0f
+            dragY = 0f
+            dragAxis = MiniPlayerDragAxis.Undetermined
+            transitionOffsetX.animateTo(
+                targetValue = -direction * contentWidthPx,
+                animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+            )
+            onComplete()
+            var waitFrames = 0
+            while (currentTrackIdState.value != targetTrack.id && waitFrames < 12) {
+                delay(16)
+                waitFrames += 1
+            }
+            incomingVisualState = null
+            transitionOffsetX.snapTo(0f)
+            transitionAnimating = false
+            dragAxis = MiniPlayerDragAxis.Undetermined
+            dragX = 0f
+            dragY = 0f
+        }
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .pointerInput(track.id, canSkip, swipeThresholdPx, gestureLockThresholdPx) {
+            .pointerInput(track.id, canSkip, transitionAnimating, swipeThresholdPx, gestureLockThresholdPx) {
                 detectDragGestures(
                     onDragStart = {
-                        scope.launch {
-                            transitionOffsetX.stop()
-                            transitionAnimating = false
+                        if (transitionAnimating) {
+                            dragAxis = MiniPlayerDragAxis.Undetermined
+                            dragX = 0f
+                            dragY = 0f
+                        } else {
+                            scope.launch {
+                                transitionOffsetX.stop()
+                                transitionAnimating = false
+                            }
+                            dragX = 0f
+                            dragY = 0f
+                            dragAxis = MiniPlayerDragAxis.Undetermined
                         }
-                        dragX = 0f
-                        dragY = 0f
-                        dragAxis = MiniPlayerDragAxis.Undetermined
                     },
                     onDragEnd = {
                         when {
+                            transitionAnimating -> {
+                                dragX = 0f
+                                dragY = 0f
+                                dragAxis = MiniPlayerDragAxis.Undetermined
+                            }
                             dragAxis == MiniPlayerDragAxis.Vertical -> {
                                 onExpandDragEnd()
                                 dragAxis = MiniPlayerDragAxis.Undetermined
                             }
-                            canSkip && dragAxis == MiniPlayerDragAxis.Horizontal && dragX <= -swipeThresholdPx -> onSkipNext()
-                            canSkip && dragAxis == MiniPlayerDragAxis.Horizontal && dragX >= swipeThresholdPx -> onSkipPrevious()
+                            canSkip && !transitionAnimating && dragAxis == MiniPlayerDragAxis.Horizontal &&
+                                dragX <= -swipeThresholdPx && nextTrack != null -> {
+                                animateSwipeComplete(
+                                    startOffset = dragX,
+                                    direction = 1,
+                                    targetTrack = nextTrack,
+                                    onComplete = onSkipNext,
+                                )
+                            }
+                            canSkip && !transitionAnimating && dragAxis == MiniPlayerDragAxis.Horizontal &&
+                                dragX >= swipeThresholdPx && previousTrack != null -> {
+                                animateSwipeComplete(
+                                    startOffset = dragX,
+                                    direction = -1,
+                                    targetTrack = previousTrack,
+                                    onComplete = onSkipPrevious,
+                                )
+                            }
                             else -> animateBackToRest()
                         }
                         dragY = 0f
                     },
                     onDragCancel = {
-                        animateBackToRest()
                         if (dragAxis == MiniPlayerDragAxis.Vertical) {
                             onExpandDragEnd()
+                        }
+                        if (!transitionAnimating) {
+                            animateBackToRest()
                         }
                         dragAxis = MiniPlayerDragAxis.Undetermined
                         dragY = 0f
@@ -217,22 +230,26 @@ fun MiniPlayer(
                                 dragX += dragAmount.x
                                 dragY += dragAmount.y
                                 if (maxOf(abs(dragX), abs(dragY)) >= gestureLockThresholdPx) {
-                                    dragAxis = if (abs(dragY) > abs(dragX)) {
-                                        MiniPlayerDragAxis.Vertical
-                                    } else {
-                                        MiniPlayerDragAxis.Horizontal
+                                    dragAxis = when {
+                                        transitionAnimating -> MiniPlayerDragAxis.Undetermined
+                                        abs(dragY) > abs(dragX) -> MiniPlayerDragAxis.Vertical
+                                        canSkip -> MiniPlayerDragAxis.Horizontal
+                                        else -> MiniPlayerDragAxis.Undetermined
                                     }
                                     if (dragAxis == MiniPlayerDragAxis.Vertical) {
                                         dragX = 0f
                                         onExpandDragStart()
                                         onExpandDrag(-dragY)
+                                    } else if (dragAxis == MiniPlayerDragAxis.Horizontal) {
+                                        dragY = 0f
                                     } else {
+                                        dragX = 0f
                                         dragY = 0f
                                     }
                                 }
                             }
                             MiniPlayerDragAxis.Horizontal -> {
-                                dragX += dragAmount.x
+                                dragX = (dragX + dragAmount.x).coerceIn(-contentWidthPx, contentWidthPx)
                                 dragY = 0f
                             }
                             MiniPlayerDragAxis.Vertical -> {
@@ -299,6 +316,8 @@ fun MiniPlayer(
                             bitmap = displayedArtworkBitmap,
                             accentColor = track.accentColor,
                             keepPreviousWhileLoading = true,
+                            placeholderIcon = Icons.Filled.LibraryMusic,
+                            placeholderIconSize = 28.dp,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clip(RoundedCornerShape(5.dp)),
@@ -321,7 +340,7 @@ fun MiniPlayer(
                             dragAxis = dragAxis,
                         )
                         MiniPlayerTrackText(
-                            state = displayedVisualState,
+                            state = visualState,
                             offsetX = currentOffset,
                         )
                         val dragPreview = when {

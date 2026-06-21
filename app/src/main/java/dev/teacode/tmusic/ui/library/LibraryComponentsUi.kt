@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -97,6 +100,7 @@ fun AlbumArtwork(
     coverTrackId: String?,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     modifier: Modifier = Modifier,
+    placeholderIconSize: androidx.compose.ui.unit.Dp = 24.dp,
 ) {
     LaunchedEffect(coverTrackId) {
         coverTrackId?.let { onRequestArtwork(it, ArtworkImageSize.AlbumGrid) }
@@ -106,6 +110,8 @@ fun AlbumArtwork(
         bitmap = artworkBitmap,
         accentColor = album.accentColor,
         keepPreviousWhileLoading = true,
+        placeholderIcon = Icons.Filled.Album,
+        placeholderIconSize = placeholderIconSize,
         modifier = modifier,
     )
 }
@@ -144,6 +150,7 @@ fun AlbumCard(
                     .fillMaxWidth()
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(6.dp)),
+                placeholderIconSize = if (compact) 34.dp else 42.dp,
             )
             Text(
                 text = album.title,
@@ -173,7 +180,7 @@ fun ArtistListRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
+            .padding(horizontal = ScreenHorizontalPadding, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -215,13 +222,14 @@ fun AlbumListRow(
     coverTrackId: String?,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     onClick: () -> Unit,
+    recentBadge: String? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
+            .padding(horizontal = ScreenHorizontalPadding, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AlbumArtwork(
@@ -232,16 +240,26 @@ fun AlbumListRow(
             modifier = Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(6.dp)),
+            placeholderIconSize = 22.dp,
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = album.title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = album.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                recentBadge?.let { label ->
+                    RecentAlbumBadge(label = label)
+                }
+            }
             Text(
                 text = albumListSubtitle(album),
                 style = MaterialTheme.typography.bodySmall,
@@ -250,5 +268,30 @@ fun AlbumListRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun RecentAlbumBadge(label: String) {
+    val normalized = label.uppercase()
+    val containerColor = when (normalized) {
+        "NEW" -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.tertiaryContainer
+    }
+    val contentColor = when (normalized) {
+        "NEW" -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onTertiaryContainer
+    }
+    Surface(
+        shape = RoundedCornerShape(5.dp),
+        color = containerColor,
+        contentColor = contentColor,
+    ) {
+        Text(
+            text = normalized,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 }

@@ -1,8 +1,17 @@
 package dev.teacode.tmusic
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.core.view.WindowCompat
 import dev.teacode.tmusic.auth.GoogleSignInTokenProvider
 import dev.teacode.tmusic.data.AppConfig
 import dev.teacode.tmusic.data.ArtworkCacheStore
@@ -19,6 +28,9 @@ import dev.teacode.tmusic.data.SessionStore
 import dev.teacode.tmusic.data.TMusicApiClient
 import dev.teacode.tmusic.data.UserPreferencesStore
 import dev.teacode.tmusic.ui.TMusicApp
+import dev.teacode.tmusic.ui.theme.AppThemeController
+import dev.teacode.tmusic.ui.theme.AppThemeMode
+import dev.teacode.tmusic.ui.theme.LocalAppThemeController
 import dev.teacode.tmusic.ui.theme.TMusicTheme
 
 class MainActivity : ComponentActivity() {
@@ -54,20 +66,47 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            TMusicTheme {
-                TMusicApp(
-                    authRepository = authRepository,
-                    musicRepository = musicRepository,
-                    googleSignInTokenProvider = googleSignInTokenProvider,
-                    userPreferencesStore = userPreferencesStore,
-                    libraryCacheStore = libraryCacheStore,
-                    offlineLyricsStore = offlineLyricsStore,
-                    artworkCacheStore = artworkCacheStore,
-                    playbackStateStore = playbackStateStore,
-                    pendingLibraryMutationStore = pendingLibraryMutationStore,
-                    pendingPlayEventStore = pendingPlayEventStore,
-                    lastFmAuthTokenStore = lastFmAuthTokenStore,
-                )
+            var appThemeMode by remember {
+                mutableStateOf(AppThemeMode.fromStorageValue(userPreferencesStore.themeMode()))
+            }
+            val systemInDarkTheme = isSystemInDarkTheme()
+            val useDarkSystemBars = when (appThemeMode) {
+                AppThemeMode.Dark -> true
+                AppThemeMode.Light -> false
+                AppThemeMode.System -> systemInDarkTheme
+            }
+            SideEffect {
+                window.statusBarColor = Color.TRANSPARENT
+                window.navigationBarColor = Color.TRANSPARENT
+                WindowCompat.getInsetsController(window, window.decorView).run {
+                    isAppearanceLightStatusBars = !useDarkSystemBars
+                    isAppearanceLightNavigationBars = !useDarkSystemBars
+                }
+            }
+            CompositionLocalProvider(
+                LocalAppThemeController provides AppThemeController(
+                    themeMode = appThemeMode,
+                    onThemeModeChange = { mode ->
+                        appThemeMode = mode
+                        userPreferencesStore.setThemeMode(mode.storageValue)
+                    },
+                ),
+            ) {
+                TMusicTheme(themeMode = appThemeMode) {
+                    TMusicApp(
+                        authRepository = authRepository,
+                        musicRepository = musicRepository,
+                        googleSignInTokenProvider = googleSignInTokenProvider,
+                        userPreferencesStore = userPreferencesStore,
+                        libraryCacheStore = libraryCacheStore,
+                        offlineLyricsStore = offlineLyricsStore,
+                        artworkCacheStore = artworkCacheStore,
+                        playbackStateStore = playbackStateStore,
+                        pendingLibraryMutationStore = pendingLibraryMutationStore,
+                        pendingPlayEventStore = pendingPlayEventStore,
+                        lastFmAuthTokenStore = lastFmAuthTokenStore,
+                    )
+                }
             }
         }
     }

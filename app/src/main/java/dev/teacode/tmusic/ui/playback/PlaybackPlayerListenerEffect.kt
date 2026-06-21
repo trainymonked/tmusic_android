@@ -6,6 +6,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.HttpDataSource
 import dev.teacode.tmusic.domain.PlayerState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
@@ -36,7 +37,7 @@ internal fun PlaybackPlayerListenerEffect(
     onEnsureActivePlayEvent: (track: dev.teacode.tmusic.domain.Track, forceNew: Boolean) -> Unit,
     onClearNowPlayingEvent: (ActivePlayEvent?) -> Unit,
     onRequestNextPrefetch: () -> Unit,
-    onPlayerError: (String) -> Unit,
+    onPlayerError: (message: String, httpStatusCode: Int?) -> Boolean,
     onDisposePlayer: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -85,24 +86,63 @@ internal fun PlaybackPlayerListenerEffect(
                 val mediaId = mediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
                 val request = gaplessPlaybackRequest()
                 val requestIndex = request?.mediaIds?.indexOf(mediaId)?.takeIf { it >= 0 }
-                val queueIndex = gaplessMediaQueueIndices()[mediaId]
+                val mappedQueueIndex = gaplessMediaQueueIndices()[mediaId]
                     ?: requestIndex?.let { request.queueIndices.getOrNull(it) }
-                    ?: return
-                val nextTrack = playbackQueue().tracks.getOrNull(queueIndex) ?: return
-                if (
-                    playbackQueue().currentIndex == queueIndex &&
-                    playerState().currentTrack?.id == nextTrack.id
-                ) {
-                    return
-                }
+                    ?: run {
+                        logPlaybackDebug(
+                            "media transition ignored: no queueIndex mediaId=$mediaId reason=$reason " +
+                                "playerIndex=${observedPlayer.currentMediaItemIndex} ${playbackQueue().debugSummary()}",
+                        )
+                        return
+                    }
+                val mediaTrackId = mediaId.playbackMediaTrackId()
                 scope.launch {
                     yield()
                     if (!isCurrentPlayer(observedPlayer) || observedPlayer.currentMediaItem?.mediaId != mediaId) {
+                        logPlaybackDebug(
+                            "media transition stale after yield mediaId=$mediaId currentMediaId=" +
+                                "${observedPlayer.currentMediaItem?.mediaId}",
+                        )
+                        return@launch
+                    }
+                    val currentQueue = playbackQueue()
+                    val queueIndex = currentQueue.resolvePlaybackMediaQueueIndex(
+                        mappedQueueIndex = mappedQueueIndex,
+                        mediaTrackId = mediaTrackId,
+                    ) ?: run {
+                        logPlaybackDebug(
+                            "media transition ignored: missing track mappedQueueIndex=$mappedQueueIndex " +
+                                "mediaTrackId=$mediaTrackId mediaId=$mediaId reason=$reason ${currentQueue.debugSummary()}",
+                        )
+                        return@launch
+                    }
+                    val nextTrack = currentQueue.tracks.getOrNull(queueIndex) ?: run {
+                        logPlaybackDebug(
+                            "media transition ignored: missing track queueIndex=$queueIndex mediaId=$mediaId " +
+                                "reason=$reason ${currentQueue.debugSummary()}",
+                        )
+                        return@launch
+                    }
+                    if (queueIndex != mappedQueueIndex) {
+                        logPlaybackDebug(
+                            "media transition remapped mediaId=$mediaId mapped=$mappedQueueIndex actual=$queueIndex " +
+                                "mediaTrackId=$mediaTrackId next=${nextTrack.debugTrack()} ${currentQueue.debugSummary()}",
+                        )
+                    }
+                    logPlaybackDebug(
+                        "media transition mediaId=$mediaId reason=$reason queueIndex=$queueIndex " +
+                            "next=${nextTrack.debugTrack()} player=${playerState().currentTrack?.debugTrack()} " +
+                            currentQueue.debugSummary(),
+                    )
+                    if (
+                        currentQueue.currentIndex == queueIndex &&
+                        playerState().currentTrack?.id == nextTrack.id
+                    ) {
+                        logPlaybackDebug("media transition already applied queueIndex=$queueIndex track=${nextTrack.debugTrack()}")
                         return@launch
                     }
                     val previousEvent = activePlayEvent()
                     onCompleteActivePlayEvent()
-                    val currentQueue = playbackQueue()
                     val previousQueueIndex = currentQueue.currentIndex
                     val artworkDirection = if (
                         queueIndex < previousQueueIndex &&
@@ -120,6 +160,10 @@ internal fun PlaybackPlayerListenerEffect(
                         streamUrl = gaplessMediaUrls()[mediaId]
                             ?: requestIndex?.let { request?.urls?.getOrNull(it) },
                     )
+                    logPlaybackDebug(
+                        "media transition apply queueIndex=$queueIndex next=${nextTrack.debugTrack()} " +
+                            nextQueue.debugSummary(),
+                    )
                     onQueueTransition(nextQueue, nextState, artworkDirection)
                     onEnsureActivePlayEvent(nextTrack, previousEvent?.trackId == nextTrack.id)
                     onRequestNextPrefetch()
@@ -130,12 +174,13 @@ internal fun PlaybackPlayerListenerEffect(
                 if (!isCurrentPlayer(observedPlayer)) {
                     return
                 }
-                onPlayerError(
-                    error.causeChainMessage().takeIf { it.isNotBlank() }
-                        ?: error.localizedMessage
-                        ?: "Playback failed",
+                val handled = onPlayerError(
+                    error.playbackErrorMessage(),
+                    error.httpResponseCode(),
                 )
-                onPlayerStateChanged(playerState().copy(isPlaying = false))
+                if (!handled) {
+                    onPlayerStateChanged(playerState().copy(isPlaying = false))
+                }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -180,4 +225,42 @@ internal fun PlaybackPlayerListenerEffect(
             observedPlayer.removeListener(listener)
         }
     }
+}
+
+private fun PlaybackException.playbackErrorMessage(): String {
+    return causeChainMessage().takeIf { it.isNotBlank() }
+        ?: localizedMessage
+        ?: "Playback failed"
+}
+
+private fun Throwable.httpResponseCode(): Int? {
+    return generateSequence(this as Throwable?) { it.cause }
+        .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+        .firstOrNull()
+        ?.responseCode
+}
+
+private fun String.playbackMediaTrackId(): String? {
+    val parts = split(':', limit = 4)
+    return when {
+        parts.size == 4 && parts[0] == "crossfade" -> parts[3]
+        parts.size >= 3 -> parts.last()
+        else -> null
+    }?.takeIf { it.isNotBlank() }
+}
+
+private fun PlaybackQueue.resolvePlaybackMediaQueueIndex(
+    mappedQueueIndex: Int,
+    mediaTrackId: String?,
+): Int? {
+    if (tracks.isEmpty()) {
+        return null
+    }
+    if (mediaTrackId == null) {
+        return mappedQueueIndex.takeIf { it in tracks.indices }
+    }
+    mappedQueueIndex
+        .takeIf { index -> index in tracks.indices && tracks[index].id == mediaTrackId }
+        ?.let { return it }
+    return tracks.indexOfFirst { it.id == mediaTrackId }.takeIf { it >= 0 }
 }

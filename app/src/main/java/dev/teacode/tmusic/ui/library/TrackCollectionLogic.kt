@@ -19,6 +19,13 @@ internal fun List<Track>.withKnownTrackMetadata(existingTracks: List<Track>): Li
             } else {
                 track.downloadState
             },
+            artistId = track.artistId ?: existing.artistId,
+            artistIds = track.artistIds.ifEmpty { existing.artistIds },
+            artists = track.artists.ifEmpty { existing.artists },
+            albumId = track.albumId ?: existing.albumId,
+            albumArtist = track.albumArtist ?: existing.albumArtist,
+            albumArtistId = track.albumArtistId ?: existing.albumArtistId,
+            albumArtists = track.albumArtists.ifEmpty { existing.albumArtists },
             isLiked = track.isLiked ?: existing.isLiked,
         )
     }

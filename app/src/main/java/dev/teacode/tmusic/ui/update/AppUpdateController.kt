@@ -12,7 +12,8 @@ import androidx.compose.runtime.setValue
 import dev.teacode.tmusic.data.AppUpdateChecker
 import dev.teacode.tmusic.data.AppUpdateInfo
 import dev.teacode.tmusic.data.UserPreferencesStore
-import dev.teacode.tmusic.data.isAppVersionNewer
+import dev.teacode.tmusic.data.enforcedForCurrentApp
+import dev.teacode.tmusic.data.isAvailableForCurrentApp
 import kotlinx.coroutines.CancellationException
 
 internal class AppUpdateController(
@@ -56,6 +57,23 @@ internal class AppUpdateController(
         dialogUpdate = null
     }
 
+    fun applyServerUpdate(update: AppUpdateInfo, prompt: Boolean) {
+        val enforcedUpdate = update.enforcedForCurrentApp()
+        Log.d(
+            APP_UPDATE_LOG_TAG,
+            "server update version=${enforcedUpdate.version} latestCode=${enforcedUpdate.latestVersionCode} " +
+                "minCode=${enforcedUpdate.minSupportedVersionCode} force=${enforcedUpdate.forceUpdate}",
+        )
+        availableUpdate = enforcedUpdate
+        userPreferencesStore.setCachedAppUpdate(enforcedUpdate)
+        if (prompt || enforcedUpdate.forceUpdate) {
+            if (userPreferencesStore.lastPromptedUpdateVersion() != enforcedUpdate.version || enforcedUpdate.forceUpdate) {
+                userPreferencesStore.setLastPromptedUpdateVersion(enforcedUpdate.version)
+            }
+            dialogUpdate = enforcedUpdate
+        }
+    }
+
     fun openUpdate(update: AppUpdateInfo?) {
         val selectedUpdate = update ?: return
         if (readyToInstall && downloadedVersion == selectedUpdate.version) {
@@ -91,14 +109,6 @@ internal class AppUpdateController(
             return
         }
         val now = System.currentTimeMillis()
-        val elapsedSinceLastCheck = now - userPreferencesStore.lastUpdateCheckEpochMs()
-        if (!manual && elapsedSinceLastCheck < APP_UPDATE_CHECK_INTERVAL_MS) {
-            Log.d(
-                APP_UPDATE_LOG_TAG,
-                "skip automatic check by throttle elapsedMs=$elapsedSinceLastCheck intervalMs=$APP_UPDATE_CHECK_INTERVAL_MS",
-            )
-            return
-        }
         userPreferencesStore.setLastUpdateCheckEpochMs(now)
         checkInProgress = true
         Log.d(APP_UPDATE_LOG_TAG, "run check manual=$manual currentVersion=$currentVersion")
@@ -115,16 +125,14 @@ internal class AppUpdateController(
         }
         if (update != null) {
             Log.d(APP_UPDATE_LOG_TAG, "new update available version=${update.version} url=${update.downloadUrl}")
-            availableUpdate = update
-            userPreferencesStore.setCachedAppUpdate(update)
-            if (manual || userPreferencesStore.lastPromptedUpdateVersion() != update.version) {
-                userPreferencesStore.setLastPromptedUpdateVersion(update.version)
-                dialogUpdate = update
-            }
+            applyServerUpdate(
+                update = update,
+                prompt = manual || userPreferencesStore.lastPromptedUpdateVersion() != update.version,
+            )
             if (manual) {
                 onNotice("Update ${update.version} is available.")
             }
-        } else if (availableUpdate?.let { isAppVersionNewer(it.version, currentVersion) } != true) {
+        } else if (availableUpdate?.isAvailableForCurrentApp(currentVersion) != true) {
             Log.d(APP_UPDATE_LOG_TAG, "no newer update available")
             userPreferencesStore.clearCachedAppUpdate()
             if (manual) {

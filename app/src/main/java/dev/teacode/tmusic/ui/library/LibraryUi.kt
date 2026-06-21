@@ -63,10 +63,12 @@ fun LibraryScreen(
     val favoritePlaylist = playlists.firstOrNull { it.isFavoritesPlaylist() }
     val regularPlaylists = playlists.filterNot { it.id == favoritePlaylist?.id }
     val libraryItems = remember(playlists, savedAlbums, tracks, albumTracksById, offlineOnly) {
+        val mixedItems = (savedAlbums.map { LibraryListItem.AlbumItem(it) } +
+            regularPlaylists.map { LibraryListItem.PlaylistItem(it) })
+            .sortedByDescending { it.librarySortTimestamp.orEmpty() }
         val orderedItems = buildList {
             favoritePlaylist?.let { add(LibraryListItem.PlaylistItem(it)) }
-            savedAlbums.asReversed().forEach { add(LibraryListItem.AlbumItem(it)) }
-            regularPlaylists.asReversed().forEach { add(LibraryListItem.PlaylistItem(it)) }
+            addAll(mixedItems)
         }
         if (!offlineOnly) {
             orderedItems
@@ -88,14 +90,14 @@ fun LibraryScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
+                        .padding(start = ScreenHorizontalPadding, end = ScreenHorizontalPadding, bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -117,7 +119,7 @@ fun LibraryScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 40.dp),
+                            .padding(horizontal = ScreenHorizontalPadding, vertical = 40.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -175,6 +177,12 @@ fun LibraryScreen(
         )
     }
 }
+
+private val LibraryListItem.librarySortTimestamp: String?
+    get() = when (this) {
+        is LibraryListItem.PlaylistItem -> playlist.updatedAt
+        is LibraryListItem.AlbumItem -> album.userAlbumCreatedAt
+    }
 
 private fun Playlist.downloadState(tracks: List<Track>): DownloadState {
     val playlistTracks = tracksFrom(tracks)

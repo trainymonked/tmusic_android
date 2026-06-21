@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.data.TMusicApiException
+import java.net.HttpURLConnection
 import kotlinx.coroutines.CancellationException
 
 internal fun AppDestination.isHomeOverview(): Boolean {
@@ -27,5 +28,26 @@ internal fun Throwable.isServerAvailabilityFailure(): Boolean {
     if (this is CancellationException) {
         return false
     }
+    if (isAppUpdateRequiredError()) {
+        return false
+    }
     return this !is TMusicApiException || statusCode == null || statusCode >= 500
+}
+
+internal fun Throwable.isDeletedAccountError(): Boolean {
+    return this is TMusicApiException &&
+        statusCode == HttpURLConnection.HTTP_NOT_FOUND &&
+        userMessage().contains("user", ignoreCase = true) &&
+        userMessage().contains("not found", ignoreCase = true)
+}
+
+internal fun Throwable.isMediaPlaybackDisabledError(): Boolean {
+    return this is TMusicApiException &&
+        statusCode == HttpURLConnection.HTTP_FORBIDDEN &&
+        userMessage().contains("Media playback is disabled", ignoreCase = true)
+}
+
+internal fun Throwable.isAppUpdateRequiredError(): Boolean {
+    return this is TMusicApiException &&
+        (statusCode == 426 || code.equals("APP_UPDATE_REQUIRED", ignoreCase = true))
 }

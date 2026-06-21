@@ -8,7 +8,7 @@ import dev.teacode.tmusic.domain.Track
 internal data class MergedLibraryState(
     val playlists: List<Playlist>,
     val tracks: List<Track>,
-    val recentTracks: List<Track>,
+    val recentAlbums: List<LibraryAlbum>,
     val databaseTrackCount: Int?,
     val artists: List<LibraryArtist>,
     val albums: List<LibraryAlbum>,
@@ -23,7 +23,7 @@ internal fun LoadedLibraryState.mergeWithCachedLibrary(
     targetDestination: AppDestination,
     cachedPlaylists: List<Playlist>,
     cachedTracks: List<Track>,
-    cachedRecentTracks: List<Track>,
+    cachedRecentAlbums: List<LibraryAlbum>,
     cachedTrackCount: Int?,
     cachedArtists: List<LibraryArtist>,
     cachedAlbums: List<LibraryAlbum>,
@@ -33,7 +33,7 @@ internal fun LoadedLibraryState.mergeWithCachedLibrary(
     val loadedSavedAlbumIds = savedAlbums.orEmpty().map { it.id }.toSet()
     val nextPlaylists = playlists?.let(cachedPlaylists::mergeLoadedPlaylists) ?: cachedPlaylists
     val nextTracks = tracks?.let(cachedTracks::mergeLoadedTracks) ?: cachedTracks
-    val nextRecentTracks = recentTracks ?: cachedRecentTracks
+    val nextRecentAlbums = recentAlbums ?: cachedRecentAlbums
     val nextArtists = artists
         ?.sortedArtistsForDisplay()
         ?: cachedArtists
@@ -42,6 +42,9 @@ internal fun LoadedLibraryState.mergeWithCachedLibrary(
             val existingAlbum = cachedAlbums.firstOrNull { it.id == album.id }
                 ?: cachedSavedAlbums.firstOrNull { it.id == album.id }
             album.copy(
+                artistId = album.artistId ?: existingAlbum?.artistId,
+                artistIds = album.artistIds.ifEmpty { existingAlbum?.artistIds.orEmpty() },
+                artists = album.artists.ifEmpty { existingAlbum?.artists.orEmpty() },
                 savedByCurrentUser = album.savedByCurrentUser ||
                     album.id in loadedSavedAlbumIds ||
                     existingAlbum?.savedByCurrentUser == true,
@@ -57,13 +60,15 @@ internal fun LoadedLibraryState.mergeWithCachedLibrary(
             val existingAlbum = cachedAlbums.firstOrNull { it.id == album.id }
                 ?: cachedSavedAlbums.firstOrNull { it.id == album.id }
             album.copy(
+                artistId = album.artistId ?: existingAlbum?.artistId,
+                artistIds = album.artistIds.ifEmpty { existingAlbum?.artistIds.orEmpty() },
+                artists = album.artists.ifEmpty { existingAlbum?.artists.orEmpty() },
                 savedByCurrentUser = true,
                 isOfflineEnabled = album.isOfflineEnabled ||
                     album.id in offlineAlbumIds ||
                     existingAlbum?.isOfflineEnabled == true,
             )
         }
-        ?.sortedAlbumsForDisplay()
         ?: cachedSavedAlbums
 
     val loadedArtistCount = artists?.size
@@ -71,7 +76,7 @@ internal fun LoadedLibraryState.mergeWithCachedLibrary(
     return MergedLibraryState(
         playlists = nextPlaylists,
         tracks = nextTracks,
-        recentTracks = nextRecentTracks,
+        recentAlbums = nextRecentAlbums,
         databaseTrackCount = trackCount ?: cachedTrackCount,
         artists = nextArtists,
         albums = nextAlbums,

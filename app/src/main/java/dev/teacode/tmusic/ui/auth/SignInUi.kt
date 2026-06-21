@@ -1,6 +1,8 @@
 package dev.teacode.tmusic.ui
 
+import android.app.Activity
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,25 +18,30 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import dev.teacode.tmusic.R
+import dev.teacode.tmusic.ui.theme.AppThemeMode
+import dev.teacode.tmusic.ui.theme.LocalAppThemeController
 import org.json.JSONObject
 
 @Composable
@@ -48,37 +55,56 @@ fun SignInScreen(
     onContinueOffline: () -> Unit,
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val appThemeController = LocalAppThemeController.current
+    val systemInDarkTheme = isSystemInDarkTheme()
+    val splashBackground = colorResource(id = R.color.splash_background)
+    val typography = MaterialTheme.typography
+    val signInColorScheme = darkColorScheme(
+        primary = Color.White,
+        onPrimary = Color.Black,
+        primaryContainer = Color(0xFF242424),
+        onPrimaryContainer = Color.White,
+        secondary = Color(0xFFC7C7C7),
+        onSecondary = Color.Black,
+        background = splashBackground,
+        onBackground = Color.White,
+        surface = Color(0xFF0B0B0B),
+        onSurface = Color.White,
+        surfaceContainer = Color(0xFF171717),
+        surfaceVariant = Color(0xFF242424),
+        onSurfaceVariant = Color(0xFFC7C7C7),
+        outline = Color(0xFF8F8F8F),
+        error = Color(0xFFFFB4AB),
+    )
     val appIconBitmap = remember(context) {
         context.drawableResourceBitmap(R.mipmap.ic_launcher)
     }
-    val splashBackground = colorResource(id = R.color.splash_background)
-    val baseTypography = MaterialTheme.typography
-    val signInColorScheme = darkColorScheme(
-        primary = Color.White,
-        onPrimary = splashBackground,
-        primaryContainer = Color(0xFF1E1A18),
-        onPrimaryContainer = Color.White,
-        secondary = Color(0xFFD0C7C1),
-        onSecondary = splashBackground,
-        secondaryContainer = Color(0xFF211C19),
-        onSecondaryContainer = Color.White,
-        tertiary = Color(0xFFE8E2DD),
-        onTertiary = splashBackground,
-        background = splashBackground,
-        onBackground = Color.White,
-        surface = splashBackground,
-        onSurface = Color.White,
-        surfaceContainer = Color(0xFF171311),
-        surfaceVariant = Color(0xFF2A2420),
-        onSurfaceVariant = Color(0xFFCFC5BE),
-        outline = Color(0xFF81756D),
-        error = Color(0xFFFFB4AB),
-    )
     val friendlyError = errorMessage?.toSignInErrorMessage(canContinueOffline)
+
+    DisposableEffect(view, appThemeController.themeMode, systemInDarkTheme) {
+        val window = (view.context as? Activity)?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        controller?.run {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+        onDispose {
+            val useDarkSystemBars = when (appThemeController.themeMode) {
+                AppThemeMode.Dark -> true
+                AppThemeMode.Light -> false
+                AppThemeMode.System -> systemInDarkTheme
+            }
+            controller?.run {
+                isAppearanceLightStatusBars = !useDarkSystemBars
+                isAppearanceLightNavigationBars = !useDarkSystemBars
+            }
+        }
+    }
 
     MaterialTheme(
         colorScheme = signInColorScheme,
-        typography = baseTypography,
+        typography = typography,
     ) {
         Surface(
             color = MaterialTheme.colorScheme.background,

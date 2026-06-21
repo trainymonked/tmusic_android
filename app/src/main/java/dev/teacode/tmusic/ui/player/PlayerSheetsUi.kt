@@ -60,6 +60,36 @@ fun PlayerBottomSheet(
     val sheetInteraction = remember { MutableInteractionSource() }
     val scrimInteraction = remember { MutableInteractionSource() }
 
+    fun applySheetDrag(delta: Float): Boolean {
+        val heightPx = containerHeightPx.coerceAtLeast(1f)
+        val currentFraction = draggedHeightFraction ?: settledHeightFraction.value
+        val nextFraction = (currentFraction - delta / heightPx).coerceIn(0.25f, 1f)
+        if (nextFraction == currentFraction) {
+            return false
+        }
+        draggedHeightFraction = nextFraction
+        return true
+    }
+
+    fun settleSheet(releasedFraction: Float) {
+        val targetFraction = when {
+            releasedFraction < PLAYER_SHEET_CLOSE_FRACTION -> {
+                onClose()
+                PLAYER_SHEET_COLLAPSED_FRACTION
+            }
+            releasedFraction >= (1f + PLAYER_SHEET_COLLAPSED_FRACTION) / 2f -> 1f
+            else -> PLAYER_SHEET_COLLAPSED_FRACTION
+        }
+        scope.launch {
+            settledHeightFraction.snapTo(releasedFraction)
+            draggedHeightFraction = null
+            settledHeightFraction.animateTo(
+                targetValue = targetFraction,
+                animationSpec = tween(durationMillis = 220),
+            )
+        }
+    }
+
     fun Modifier.sheetDragInput(): Modifier = pointerInput(containerHeightPx) {
         detectVerticalDragGestures(
             onDragStart = {
@@ -68,29 +98,11 @@ fun PlayerBottomSheet(
             },
             onVerticalDrag = { change, delta ->
                 change.consume()
-                val heightPx = containerHeightPx.coerceAtLeast(1f)
-                val nextFraction = ((draggedHeightFraction ?: settledHeightFraction.value) - delta / heightPx)
-                    .coerceIn(0.25f, 1f)
-                draggedHeightFraction = nextFraction
+                applySheetDrag(delta)
             },
             onDragEnd = {
                 val releasedFraction = draggedHeightFraction ?: settledHeightFraction.value
-                val targetFraction = when {
-                    releasedFraction < PLAYER_SHEET_CLOSE_FRACTION -> {
-                        onClose()
-                        PLAYER_SHEET_COLLAPSED_FRACTION
-                    }
-                    releasedFraction >= (1f + PLAYER_SHEET_COLLAPSED_FRACTION) / 2f -> 1f
-                    else -> PLAYER_SHEET_COLLAPSED_FRACTION
-                }
-                scope.launch {
-                    settledHeightFraction.snapTo(releasedFraction)
-                    draggedHeightFraction = null
-                    settledHeightFraction.animateTo(
-                        targetValue = targetFraction,
-                        animationSpec = tween(durationMillis = 220),
-                    )
-                }
+                settleSheet(releasedFraction)
             },
             onDragCancel = {
                 val releasedFraction = draggedHeightFraction ?: settledHeightFraction.value
@@ -141,7 +153,7 @@ fun PlayerBottomSheet(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .padding(vertical = 12.dp),
             ) {
                 SheetDragHandle(
                     modifier = Modifier.sheetDragInput(),
@@ -149,7 +161,11 @@ fun PlayerBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 10.dp),
+                        .padding(
+                            start = ScreenHorizontalPadding,
+                            end = ScreenHorizontalPadding,
+                            bottom = 10.dp,
+                        ),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

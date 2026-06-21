@@ -41,7 +41,9 @@ internal fun AppUpdateDialogHost(controller: AppUpdateController) {
             actionEnabled = controller.actionEnabled,
             onDismiss = controller::dismissDialog,
             onUpdate = {
-                controller.dismissDialog()
+                if (!update.forceUpdate) {
+                    controller.dismissDialog()
+                }
                 controller.openUpdate(update)
             },
         )

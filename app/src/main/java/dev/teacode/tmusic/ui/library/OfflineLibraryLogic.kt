@@ -36,6 +36,9 @@ internal fun List<Track>.downloadedAlbums(allowedAlbumIds: Set<String>? = null):
                     .flatMap { track -> listOfNotNull(track.albumArtistId, track.artistId) + track.artistIds }
                     .filter { it.isNotBlank() }
                     .distinct(),
+                artists = tracks
+                    .flatMap { track -> track.albumArtists.ifEmpty { track.artists } }
+                    .distinctBy { it.id },
                 trackCount = tracks.size,
                 accentColor = firstTrack.accentColor,
                 artworkTrackId = firstTrack.id,

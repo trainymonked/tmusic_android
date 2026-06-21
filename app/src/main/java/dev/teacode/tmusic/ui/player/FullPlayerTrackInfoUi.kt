@@ -32,28 +32,10 @@ internal fun FullPlayerTrackInfo(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
+        FullPlayerTrackText(
+            track = track,
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .basicMarquee(),
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-            )
-            Text(
-                text = track.playbackArtistNames(),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        )
         Row(
             horizontalArrangement = Arrangement.spacedBy(0.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -73,9 +55,38 @@ internal fun FullPlayerTrackInfo(
                 onRemoveFromPlaylist = null,
                 onGoToArtist = onGoToArtist,
                 onGoToAlbum = onGoToAlbum,
-                buttonSize = 40.dp,
+                buttonSize = 36.dp,
                 iconModifier = Modifier.size(22.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun FullPlayerTrackText(
+    track: Track,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .basicMarquee(),
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
+        Text(
+            text = track.playbackArtistNames(),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

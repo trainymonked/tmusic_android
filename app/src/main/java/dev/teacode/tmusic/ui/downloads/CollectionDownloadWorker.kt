@@ -7,6 +7,7 @@ import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 
 internal data class PlaylistDownloadSource(
@@ -131,6 +132,7 @@ internal suspend fun downloadTracksSequentially(
     downloadTrackAssets: suspend (Track) -> Unit,
     onDownloaded: (Track) -> Unit,
     onFailed: (Track) -> Unit,
+    isFatalFailure: (Throwable) -> Boolean = { false },
 ): TrackDownloadBatchResult {
     val failedIds = mutableSetOf<String>()
     for (track in tracks) {
@@ -146,10 +148,19 @@ internal suspend fun downloadTracksSequentially(
         onQueued(track)
         try {
             downloadTrackAssets(track)
+            currentCoroutineContext().ensureActive()
             onDownloaded(track)
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            if (isFatalFailure(error)) {
+                failedIds += track.id
+                onFailed(track)
+                return TrackDownloadBatchResult(
+                    failedTrackIds = failedIds,
+                    interruptedByPolicy = true,
+                )
+            }
             failedIds += track.id
             onFailed(track)
         }

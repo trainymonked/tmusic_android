@@ -174,6 +174,10 @@ fun LyricsBlock(
     LaunchedEffect(showFullLyrics, activeLyricIndex, syncedLines.size) {
         if (showFullLyrics && syncedLines.isNotEmpty() && activeLyricIndex >= 0) {
             delay(80)
+            val visibleItems = fullLyricsListState.layoutInfo.visibleItemsInfo
+            if (visibleItems.any { it.index == activeLyricIndex }) {
+                return@LaunchedEffect
+            }
             val viewportHeight = fullLyricsListState.layoutInfo.viewportSize.height
             val centerOffset = if (viewportHeight > 0) {
                 -(viewportHeight * 0.42f).toInt()
@@ -190,6 +194,7 @@ fun LyricsBlock(
             activeLyricIndex = activeLyricIndex,
             plainLyrics = plainLyrics,
             listState = fullLyricsListState,
+            lyricsLoading = lyricsLoading,
             onRefreshLyrics = onRefreshLyrics,
             onSeek = onSeek,
             onClose = { showFullLyrics = false },

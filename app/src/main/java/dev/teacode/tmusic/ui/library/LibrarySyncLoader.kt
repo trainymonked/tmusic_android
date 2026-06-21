@@ -2,10 +2,22 @@ package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
+import dev.teacode.tmusic.data.LastFmAuthTokenStore
+import dev.teacode.tmusic.data.LibraryCacheStore
+import dev.teacode.tmusic.data.UserPreferencesStore
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
+import dev.teacode.tmusic.domain.LastFmConnection
 import dev.teacode.tmusic.domain.Playlist
+import dev.teacode.tmusic.domain.ScrobbleState
 import dev.teacode.tmusic.domain.Track
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 internal suspend fun fetchLibraryState(
     targetDestination: AppDestination,
@@ -15,7 +27,7 @@ internal suspend fun fetchLibraryState(
     val loadedAccount = authRepository.currentAccount()
     var loadedPlaylists: List<Playlist>? = null
     var loadedTracks: List<Track>? = null
-    var loadedRecentTracks: List<Track>? = null
+    var loadedRecentAlbums: List<LibraryAlbum>? = null
     var loadedArtists: List<LibraryArtist>? = null
     var loadedAlbums: List<LibraryAlbum>? = null
     var loadedSavedAlbums: List<LibraryAlbum>? = null
@@ -33,7 +45,9 @@ internal suspend fun fetchLibraryState(
             HomeRoute.Overview -> {
                 val artistPage = musicRepository.libraryArtistsPageWithTotal(limit = HOME_ARTIST_PREVIEW_LIMIT)
                 loadedArtists = artistPage.artists.filterOwnReleaseArtists()
-                loadedRecentTracks = musicRepository.recentTracks(limit = 25)
+                loadedRecentAlbums = runCatching {
+                    musicRepository.recentAlbums(limit = HOME_RECENT_ALBUM_PAGE_LIMIT)
+                }.getOrNull()
             }
             HomeRoute.Artists -> {
                 val artistPage = musicRepository.libraryArtistsPageWithTotal(limit = SCREEN_PAGE_LIMIT)
@@ -54,7 +68,7 @@ internal suspend fun fetchLibraryState(
         account = loadedAccount,
         playlists = loadedPlaylists,
         tracks = loadedTracks,
-        recentTracks = loadedRecentTracks,
+        recentAlbums = loadedRecentAlbums,
         trackCount = if (targetDestination.isHomeOverview()) {
             runCatching { musicRepository.tracksCount() }.getOrNull()
         } else {
@@ -65,4 +79,214 @@ internal suspend fun fetchLibraryState(
         savedAlbums = loadedSavedAlbums,
         lastFmConnection = loadedAccount?.lastFmConnection,
     )
+}
+
+internal fun loadLibraryAction(
+    scope: CoroutineScope,
+    targetDestination: AppDestination,
+    getLibraryLoadSerial: () -> Int,
+    setLibraryLoadSerial: (Int) -> Unit,
+    getLibraryLoadJob: () -> Job?,
+    setLibraryLoadJob: (Job?) -> Unit,
+    getLibraryLoading: () -> Boolean,
+    setLibraryLoading: (Boolean) -> Unit,
+    getOfflineOnly: () -> Boolean,
+    getAccount: () -> dev.teacode.tmusic.domain.Account?,
+    setAccount: (dev.teacode.tmusic.domain.Account?) -> Unit,
+    authRepository: RemoteAuthRepository,
+    musicRepository: RemoteMusicRepository,
+    setSyncMode: (SyncMode) -> Unit,
+    getPlaylists: () -> List<Playlist>,
+    setPlaylists: (List<Playlist>) -> Unit,
+    getTracks: () -> List<Track>,
+    setTracks: (List<Track>) -> Unit,
+    getRecentAlbums: () -> List<LibraryAlbum>,
+    setRecentAlbums: (List<LibraryAlbum>) -> Unit,
+    getDatabaseTrackCount: () -> Int?,
+    setDatabaseTrackCount: (Int?) -> Unit,
+    getArtists: () -> List<LibraryArtist>,
+    setArtists: (List<LibraryArtist>) -> Unit,
+    getAlbums: () -> List<LibraryAlbum>,
+    setAlbums: (List<LibraryAlbum>) -> Unit,
+    getSavedAlbums: () -> List<LibraryAlbum>,
+    setSavedAlbums: (List<LibraryAlbum>) -> Unit,
+    getOfflineAlbumIds: () -> Set<String>,
+    getLibraryPaging: () -> LibraryPagingState,
+    setLibraryPaging: (LibraryPagingState) -> Unit,
+    getRecentAlbumsPaging: () -> RecentAlbumsPagingState,
+    setRecentAlbumsPaging: (RecentAlbumsPagingState) -> Unit,
+    libraryCacheStore: LibraryCacheStore,
+    refreshAccessToken: () -> String?,
+    setAccessToken: (String?) -> Unit,
+    getPendingPlayEventCount: () -> Int,
+    setLastFmConnection: (LastFmConnection) -> Unit,
+    userPreferencesStore: UserPreferencesStore,
+    lastFmAuthTokenStore: LastFmAuthTokenStore,
+    setPendingLastFmToken: (String?) -> Unit,
+    setWaitingForLastFmSession: (Boolean) -> Unit,
+    signOutLocalSession: suspend (String?) -> Unit,
+    markServerUnavailable: (Throwable) -> Unit,
+    setLibraryError: (String?) -> Unit,
+) {
+    val loadSerial = getLibraryLoadSerial() + 1
+    setLibraryLoadSerial(loadSerial)
+    getLibraryLoadJob()?.cancel()
+    val timeoutJob = scope.launch {
+        delay(SERVER_OFFLINE_FALLBACK_TIMEOUT_MS)
+        if (getLibraryLoadSerial() == loadSerial && getLibraryLoading()) {
+            setAccount(getAccount() ?: authRepository.cachedAccount() ?: OfflineAccount)
+            setSyncMode(SyncMode.Offline)
+            setLibraryLoading(false)
+            setLibraryError(
+                if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
+                    "Sync is taking longer than ${SERVER_OFFLINE_FALLBACK_TIMEOUT_MS / 1000} seconds. Offline library is empty."
+                } else {
+                    "Sync is taking longer than ${SERVER_OFFLINE_FALLBACK_TIMEOUT_MS / 1000} seconds. Showing offline data while it continues."
+                },
+            )
+        }
+    }
+    val loadJob = scope.launch {
+        if (getOfflineOnly()) {
+            setSyncMode(SyncMode.OfflineOnly)
+            setLibraryError(null)
+            setLibraryLoading(false)
+            timeoutJob.cancel()
+            if (getLibraryLoadSerial() == loadSerial) {
+                setLibraryLoadJob(null)
+            }
+            return@launch
+        }
+
+        authRepository.cachedAccount()?.let { cachedAccount ->
+            if (getAccount() == null || getAccount() == OfflineAccount) {
+                setAccount(cachedAccount)
+            }
+        }
+
+        setSyncMode(SyncMode.Syncing)
+        setLibraryLoading(true)
+        setLibraryError(null)
+        try {
+            runCatching {
+                withTimeout(SERVER_SYNC_HARD_TIMEOUT_MS) {
+                    fetchLibraryState(
+                        targetDestination = targetDestination,
+                        authRepository = authRepository,
+                        musicRepository = musicRepository,
+                    )
+                }
+            }.onSuccess { loadedState ->
+                if (getLibraryLoadSerial() != loadSerial) {
+                    return@onSuccess
+                }
+                loadedState.account?.let(setAccount)
+                val mergedLibrary = loadedState.mergeWithCachedLibrary(
+                    targetDestination = targetDestination,
+                    cachedPlaylists = getPlaylists(),
+                    cachedTracks = getTracks(),
+                    cachedRecentAlbums = getRecentAlbums(),
+                    cachedTrackCount = getDatabaseTrackCount(),
+                    cachedArtists = getArtists(),
+                    cachedAlbums = getAlbums(),
+                    cachedSavedAlbums = getSavedAlbums(),
+                    offlineAlbumIds = getOfflineAlbumIds(),
+                )
+                setPlaylists(mergedLibrary.playlists)
+                setTracks(mergedLibrary.tracks)
+                setRecentAlbums(mergedLibrary.recentAlbums)
+                setDatabaseTrackCount(mergedLibrary.databaseTrackCount)
+                setArtists(mergedLibrary.artists)
+                setAlbums(mergedLibrary.albums)
+                setSavedAlbums(mergedLibrary.savedAlbums)
+                mergedLibrary.artistListNextOffset?.let { offset ->
+                    setLibraryPaging(getLibraryPaging().copy(artistNextOffset = offset))
+                }
+                mergedLibrary.artistListHasMore?.let { hasMore ->
+                    setLibraryPaging(getLibraryPaging().copy(artistHasMore = hasMore))
+                }
+                mergedLibrary.albumListNextOffset?.let { offset ->
+                    setLibraryPaging(getLibraryPaging().copy(albumNextOffset = offset))
+                }
+                mergedLibrary.albumListHasMore?.let { hasMore ->
+                    setLibraryPaging(getLibraryPaging().copy(albumHasMore = hasMore))
+                }
+                if (targetDestination.isHomeOverview() && loadedState.recentAlbums != null) {
+                    setRecentAlbumsPaging(
+                        getRecentAlbumsPaging().copy(
+                            nextOffset = mergedLibrary.recentAlbums.size,
+                            hasMore = mergedLibrary.recentAlbums.size >= HOME_RECENT_ALBUM_PAGE_LIMIT &&
+                                mergedLibrary.recentAlbums.size < HOME_RECENT_ALBUM_MAX_COUNT,
+                        ),
+                    )
+                }
+                if (loadedState.playlists != null || loadedState.tracks != null) {
+                    libraryCacheStore.saveLibrary(
+                        playlists = mergedLibrary.playlists,
+                        tracks = mergedLibrary.tracks,
+                        savedAlbums = mergedLibrary.savedAlbums,
+                    )
+                }
+                setSyncMode(SyncMode.Online)
+                setAccessToken(refreshAccessToken())
+                loadedState.lastFmConnection?.let { connection ->
+                    val nextConnection = connection.copy(pendingScrobbles = getPendingPlayEventCount())
+                    setLastFmConnection(nextConnection)
+                    userPreferencesStore.setLastFmConnection(nextConnection)
+                    if (nextConnection.state == ScrobbleState.Ready && !nextConnection.username.isNullOrBlank()) {
+                        setPendingLastFmToken(null)
+                        setWaitingForLastFmSession(false)
+                        lastFmAuthTokenStore.clear()
+                    }
+                }
+            }.onFailure { error ->
+                if (error.isDeletedAccountError()) {
+                    signOutLocalSession("Account was removed. Sign in again.")
+                    return@onFailure
+                }
+                if (error is TimeoutCancellationException) {
+                    if (getLibraryLoadSerial() != loadSerial) {
+                        return@onFailure
+                    }
+                    setAccount(getAccount() ?: authRepository.cachedAccount() ?: OfflineAccount)
+                    setSyncMode(SyncMode.Offline)
+                    setLibraryError(
+                        if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
+                            "Server sync exceeded ${SERVER_SYNC_HARD_TIMEOUT_MS / 1000} seconds. Offline library is empty."
+                        } else {
+                            "Server sync exceeded ${SERVER_SYNC_HARD_TIMEOUT_MS / 1000} seconds. Showing offline data."
+                        },
+                    )
+                    return@onFailure
+                }
+                if (error is CancellationException) {
+                    return@launch
+                }
+                if (getLibraryLoadSerial() != loadSerial) {
+                    return@onFailure
+                }
+                if (error.isAppUpdateRequiredError()) {
+                    markServerUnavailable(error)
+                    setLibraryError(null)
+                    return@onFailure
+                }
+                setAccount(getAccount() ?: authRepository.cachedAccount() ?: OfflineAccount)
+                setSyncMode(SyncMode.Offline)
+                setLibraryError(
+                    if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
+                        "Server unavailable. Offline library is empty."
+                    } else {
+                        "Server unavailable. Showing offline data. ${error.userMessage()}"
+                    },
+                )
+            }
+        } finally {
+            timeoutJob.cancel()
+            if (getLibraryLoadSerial() == loadSerial) {
+                setLibraryLoading(false)
+                setLibraryLoadJob(null)
+            }
+        }
+    }
+    setLibraryLoadJob(loadJob)
 }

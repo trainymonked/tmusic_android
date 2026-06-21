@@ -7,18 +7,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
-import dev.teacode.tmusic.data.PlaybackStateStore
 import dev.teacode.tmusic.data.SavedPlaybackState
 import dev.teacode.tmusic.domain.PlayerState
 
-internal fun persistPlaybackSnapshot(
-    store: PlaybackStateStore,
+internal fun capturePlaybackSnapshot(
     player: Player,
     state: PlayerState,
     queue: PlaybackQueue,
     activeEvent: ActivePlayEvent?,
-) {
-    val currentTrack = state.currentTrack ?: return
+): SavedPlaybackState? {
+    val currentTrack = state.currentTrack ?: return null
     val matchingEvent = activeEvent?.takeIf { it.trackId == currentTrack.id }
     val playbackState = runCatching { player.playbackState }
         .getOrDefault(Player.STATE_IDLE)
@@ -29,27 +27,25 @@ internal fun persistPlaybackSnapshot(
     } else {
         state.progressSeconds.toLong().coerceAtLeast(0L) * 1000L
     }
-    store.save(
-        SavedPlaybackState(
-            playlistId = queue.playlistId,
-            sourceType = queue.sourceType.name,
-            sourceId = queue.sourceId,
-            sourceTitle = queue.sourceTitle,
-            queueTrackIds = queue.tracks.map { it.id },
-            sourceTrackIds = queue.sourceTracks.map { it.id },
-            manualQueueFlags = queue.normalizedManualQueueFlags(),
-            queueTracks = queue.tracks,
-            sourceTracks = queue.sourceTracks,
-            isShuffled = queue.isShuffled,
-            currentIndex = queue.currentIndex,
-            trackId = currentTrack.id,
-            track = currentTrack,
-            positionMs = positionMs,
-            wasPlaying = state.isPlaying,
-            scrobbleClientEventId = matchingEvent?.clientEventId,
-            scrobblePlayedAt = matchingEvent?.playedAt,
-            scrobbleDurationPlayedMs = matchingEvent?.durationPlayedMs ?: 0L,
-        ),
+    return SavedPlaybackState(
+        playlistId = queue.playlistId,
+        sourceType = queue.sourceType.name,
+        sourceId = queue.sourceId,
+        sourceTitle = queue.sourceTitle,
+        queueTrackIds = queue.tracks.map { it.id },
+        sourceTrackIds = queue.sourceTracks.map { it.id },
+        manualQueueFlags = queue.normalizedManualQueueFlags(),
+        queueTracks = queue.tracks,
+        sourceTracks = queue.sourceTracks,
+        isShuffled = queue.isShuffled,
+        currentIndex = queue.currentIndex,
+        trackId = currentTrack.id,
+        track = currentTrack,
+        positionMs = positionMs,
+        wasPlaying = state.isPlaying,
+        scrobbleClientEventId = matchingEvent?.clientEventId,
+        scrobblePlayedAt = matchingEvent?.playedAt,
+        scrobbleDurationPlayedMs = matchingEvent?.durationPlayedMs ?: 0L,
     )
 }
 

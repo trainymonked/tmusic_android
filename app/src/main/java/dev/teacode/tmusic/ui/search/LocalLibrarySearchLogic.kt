@@ -41,7 +41,7 @@ internal fun LibraryAlbum.matchesArtistName(name: String): Boolean {
 }
 
 internal fun Track.displayArtistNames(): String {
-    val names = artist.artistNameParts()
+    val names = (artists.map { it.name } + artist.artistNameParts())
         .map { it.trim() }
         .filter { it.isNotBlank() }
         .distinctBy { it.lowercase() }

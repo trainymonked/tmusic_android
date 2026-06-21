@@ -74,6 +74,16 @@ class UserPreferencesStore(context: Context) {
             .apply()
     }
 
+    fun themeMode(): String {
+        return preferences.getString(KEY_THEME_MODE, DEFAULT_THEME_MODE) ?: DEFAULT_THEME_MODE
+    }
+
+    fun setThemeMode(mode: String) {
+        preferences.edit()
+            .putString(KEY_THEME_MODE, mode)
+            .apply()
+    }
+
     fun downloadUsingCellular(): Boolean {
         return preferences.getBoolean(KEY_DOWNLOAD_USING_CELLULAR, false)
     }
@@ -131,6 +141,11 @@ class UserPreferencesStore(context: Context) {
                 changelog = json.optString("changelog"),
                 pageUrl = json.optString("pageUrl").meaningfulStringOrNull() ?: return null,
                 downloadUrl = json.optString("downloadUrl").meaningfulStringOrNull() ?: return null,
+                releaseNotesUrl = json.optString("releaseNotesUrl"),
+                minSupportedVersionCode = json.optIntOrNull("minSupportedVersionCode"),
+                latestVersionCode = json.optIntOrNull("latestVersionCode"),
+                forceUpdate = json.optBoolean("forceUpdate", false),
+                blockingScopes = json.optStringArray("blockingScopes"),
             )
         }.getOrNull()
     }
@@ -142,6 +157,11 @@ class UserPreferencesStore(context: Context) {
             .put("changelog", update.changelog)
             .put("pageUrl", update.pageUrl)
             .put("downloadUrl", update.downloadUrl)
+            .put("releaseNotesUrl", update.releaseNotesUrl)
+            .put("minSupportedVersionCode", update.minSupportedVersionCode)
+            .put("latestVersionCode", update.latestVersionCode)
+            .put("forceUpdate", update.forceUpdate)
+            .put("blockingScopes", JSONArray(update.blockingScopes))
         preferences.edit()
             .putString(KEY_CACHED_APP_UPDATE, json.toString())
             .apply()
@@ -298,6 +318,7 @@ class UserPreferencesStore(context: Context) {
         const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
         const val KEY_PLAYBACK_REPEAT_MODE = "playback_repeat_mode"
         const val KEY_SHOW_LYRICS = "show_lyrics"
+        const val KEY_THEME_MODE = "theme_mode"
         const val KEY_DOWNLOAD_USING_CELLULAR = "download_using_cellular"
         const val KEY_CROSSFADE_SECONDS = "crossfade_seconds"
         const val KEY_LAST_PROMPTED_UPDATE_VERSION = "last_prompted_update_version"
@@ -312,11 +333,25 @@ class UserPreferencesStore(context: Context) {
         const val KEY_RECENT_LIBRARY_ITEMS = "recent_library_items"
         const val MAX_RECENT_SEARCHES = 8
         const val MAX_CROSSFADE_SECONDS = 12
-        const val UPDATE_CHECK_SOURCE_GITHUB_RELEASES = "github_releases"
+        const val DEFAULT_THEME_MODE = "dark"
+        const val UPDATE_CHECK_SOURCE_GITHUB_RELEASES = "server_policy"
     }
 }
 
 private fun String.meaningfulStringOrNull(): String? {
     val normalized = trim()
     return normalized.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+}
+
+private fun JSONObject.optIntOrNull(name: String): Int? {
+    return if (has(name) && !isNull(name)) optInt(name) else null
+}
+
+private fun JSONObject.optStringArray(name: String): List<String> {
+    val array = optJSONArray(name) ?: return emptyList()
+    val values = mutableListOf<String>()
+    for (index in 0 until array.length()) {
+        array.optString(index).meaningfulStringOrNull()?.let(values::add)
+    }
+    return values
 }

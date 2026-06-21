@@ -39,6 +39,7 @@ class SessionStore(context: Context) {
         val displayName = preferences.getString(KEY_DISPLAY_NAME, null)
         val email = preferences.getString(KEY_EMAIL, null).orEmpty()
         val avatarUrl = preferences.getString(KEY_AVATAR_URL, null)?.takeIf { it.isNotBlank() }
+        val canPlayMedia = preferences.getBoolean(KEY_CAN_PLAY_MEDIA, true)
 
         return if (id.isNullOrBlank() || displayName.isNullOrBlank()) {
             null
@@ -48,6 +49,7 @@ class SessionStore(context: Context) {
                 displayName = displayName,
                 email = email,
                 avatarUrl = avatarUrl,
+                canPlayMedia = canPlayMedia,
             )
         }
     }
@@ -60,6 +62,7 @@ class SessionStore(context: Context) {
             .putString(KEY_DISPLAY_NAME, session.user.displayName)
             .putString(KEY_EMAIL, session.user.email)
             .putString(KEY_AVATAR_URL, session.user.avatarUrl)
+            .putBoolean(KEY_CAN_PLAY_MEDIA, session.user.canPlayMedia)
             .apply()
     }
 
@@ -76,6 +79,7 @@ class SessionStore(context: Context) {
             .putString(KEY_DISPLAY_NAME, account.displayName)
             .putString(KEY_EMAIL, account.email)
             .putString(KEY_AVATAR_URL, account.avatarUrl)
+            .putBoolean(KEY_CAN_PLAY_MEDIA, account.canPlayMedia)
             .apply()
     }
 
@@ -91,5 +95,6 @@ class SessionStore(context: Context) {
         const val KEY_DISPLAY_NAME = "display_name"
         const val KEY_EMAIL = "email"
         const val KEY_AVATAR_URL = "avatar_url"
+        const val KEY_CAN_PLAY_MEDIA = "can_play_media"
     }
 }

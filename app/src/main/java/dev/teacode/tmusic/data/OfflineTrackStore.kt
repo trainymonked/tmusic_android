@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.data
 
 import android.content.Context
+import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.domain.OfflineTrackManifest
 import dev.teacode.tmusic.domain.TrackDownloadInfo
 import java.io.File
@@ -8,6 +9,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -90,6 +93,17 @@ class OfflineTrackStore(context: Context) {
         cacheDirectory.listFiles()?.forEach { file -> file.delete() }
     }
 
+    suspend fun clearCacheExcept(retainedTrackIds: Set<String>) = withContext(Dispatchers.IO) {
+        val retainedFileNames = retainedTrackIds
+            .map { trackId -> "${trackId.safeFileName()}.bin" }
+            .toSet()
+        cacheDirectory.listFiles()?.forEach { file ->
+            if (file.name !in retainedFileNames) {
+                file.delete()
+            }
+        }
+    }
+
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) {
         cacheDirectory.walkTopDown()
             .filter { it.isFile }
@@ -113,6 +127,9 @@ class OfflineTrackStore(context: Context) {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("X-TMusic-Platform", "android")
+            setRequestProperty("X-TMusic-Version-Code", BuildConfig.VERSION_CODE.toString())
+            setRequestProperty("X-TMusic-Version-Name", BuildConfig.VERSION_NAME)
         }
 
         try {
@@ -126,6 +143,7 @@ class OfflineTrackStore(context: Context) {
                 temporary.outputStream().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
+                        currentCoroutineContext().ensureActive()
                         val read = input.read(buffer)
                         if (read <= 0) {
                             break
@@ -135,10 +153,14 @@ class OfflineTrackStore(context: Context) {
                     }
                 }
             }
+        } catch (error: Throwable) {
+            temporary.delete()
+            throw error
         } finally {
             connection.disconnect()
         }
 
+        currentCoroutineContext().ensureActive()
         val checksum = digest.digest().joinToString(separator = "") { "%02x".format(it) }
         val expectedChecksum = downloadInfo.checksumSha256?.lowercase()?.takeIf { it.isNotBlank() }
         if (expectedChecksum != null && expectedChecksum != checksum.lowercase()) {
@@ -146,6 +168,7 @@ class OfflineTrackStore(context: Context) {
             throw TMusicApiException(null, "Downloaded track checksum does not match the server manifest.")
         }
 
+        currentCoroutineContext().ensureActive()
         if (destination.exists()) {
             destination.delete()
         }
@@ -176,17 +199,24 @@ class OfflineTrackStore(context: Context) {
         }
         val files = cacheDirectory.listFiles()
             ?.filter { it.isFile }
+            ?.map { file ->
+                CachedFileSnapshot(
+                    file = file,
+                    lastModified = file.lastModified(),
+                    name = file.name,
+                    length = file.length(),
+                )
+            }
             .orEmpty()
-        var totalBytes = files.sumOf { it.length() }
+        var totalBytes = files.sumOf { it.length }
         files
-            .sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name })
-            .forEach { file ->
+            .sortedWith(compareBy<CachedFileSnapshot> { it.lastModified }.thenBy { it.name })
+            .forEach { cachedFile ->
                 if (totalBytes <= maxCacheBytes) {
                     return@forEach
                 }
-                val length = file.length()
-                if (file.delete()) {
-                    totalBytes -= length
+                if (cachedFile.file.delete()) {
+                    totalBytes -= cachedFile.length
                 }
             }
     }
@@ -201,6 +231,13 @@ class OfflineTrackStore(context: Context) {
         const val READ_TIMEOUT_MS = 60_000
     }
 }
+
+private data class CachedFileSnapshot(
+    val file: File,
+    val lastModified: Long,
+    val name: String,
+    val length: Long,
+)
 
 private fun OfflineTrackManifest.toJson(): JSONObject {
     return JSONObject()

@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -14,10 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,10 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
@@ -55,68 +51,72 @@ fun TrackRow(
     onRemoveFromPlaylist: (() -> Unit)? = null,
     downloadBadgePlacement: DownloadBadgePlacement = DownloadBadgePlacement.End,
     showDownloadBadge: Boolean = true,
+    titleBadge: String? = null,
+    leadingLabel: String? = null,
     isActive: Boolean = false,
     showActivePlaybackButton: Boolean = false,
     isPlaybackPlaying: Boolean = false,
     onTogglePlayback: (() -> Unit)? = null,
     enabled: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(horizontal = ScreenHorizontalPadding, vertical = 4.dp),
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(artworkKey) {
-        onRequestArtwork?.invoke(artworkKey, ArtworkImageSize.TrackList)
+        if (leadingLabel == null) {
+            onRequestArtwork?.invoke(artworkKey, ArtworkImageSize.TrackList)
+        }
     }
     val activeBackgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val rowClick = if (isActive && onTogglePlayback != null) onTogglePlayback else onClick
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.42f)
-            .drawBehind {
-                if (isActive) {
-                    val bleed = 20.dp.toPx()
-                    drawRoundRect(
-                        color = activeBackgroundColor,
-                        topLeft = Offset(-bleed, 0f),
-                        size = Size(size.width + bleed * 2f, size.height),
-                        cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx()),
-                    )
-                }
-            }
+            .background(
+                color = if (isActive) activeBackgroundColor else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
             .clip(RoundedCornerShape(8.dp))
             .clickable(enabled = enabled) {
-                if (showActivePlaybackButton && onTogglePlayback != null) {
-                    onTogglePlayback()
-                } else {
-                    onClick()
-                }
+                rowClick()
             }
-            .padding(vertical = 4.dp),
+            .padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            ArtworkBox(
-                bitmap = artworkBitmap,
-                accentColor = track.accentColor,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(6.dp)),
-            )
-            if (showActivePlaybackButton && onTogglePlayback != null) {
+        val hasLeadingLabel = leadingLabel != null
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier,
+        ) {
+            if (hasLeadingLabel) {
                 Box(
                     modifier = Modifier
+                        .width(28.dp)
+                        .height(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = leadingLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                ArtworkBox(
+                    bitmap = artworkBitmap,
+                    accentColor = track.accentColor,
+                    placeholderIcon = Icons.Filled.LibraryMusic,
+                    placeholderIconSize = 20.dp,
+                    modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.Black.copy(alpha = 0.18f)),
-                )
-                Icon(
-                    imageVector = if (isPlaybackPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (isPlaybackPlaying) "Pause" else "Play",
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp),
+                        .clip(RoundedCornerShape(6.dp)),
                 )
             }
         }
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(if (hasLeadingLabel) 8.dp else 12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (showDownloadBadge && downloadBadgePlacement == DownloadBadgePlacement.BeforeTitle) {
@@ -133,6 +133,21 @@ fun TrackRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                titleBadge?.let { badge ->
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .background(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(6.dp),
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
             }
             Text(
                 text = track.displayArtistNames(),
@@ -159,6 +174,7 @@ fun TrackRow(
             onRemoveFromQueue = onRemoveFromQueue,
             onGoToArtist = onGoToArtist,
             onGoToAlbum = onGoToAlbum,
+            buttonSize = 40.dp,
         )
         if (showDownloadBadge && downloadBadgePlacement == DownloadBadgePlacement.End) {
             DownloadBadge(track.downloadState)

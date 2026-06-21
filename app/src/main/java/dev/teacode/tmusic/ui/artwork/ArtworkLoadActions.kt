@@ -1,0 +1,162 @@
+package dev.teacode.tmusic.ui
+
+import androidx.compose.ui.graphics.ImageBitmap
+import dev.teacode.tmusic.data.ArtworkCacheStore
+import dev.teacode.tmusic.data.LibraryCacheStore
+import dev.teacode.tmusic.data.RemoteMusicRepository
+import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.LibraryArtist
+import dev.teacode.tmusic.domain.LibrarySearchResults
+import dev.teacode.tmusic.domain.Playlist
+import dev.teacode.tmusic.domain.Track
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+
+internal suspend fun cachedArtworkBitmapAction(
+    artworkKey: String,
+    imageSize: ArtworkImageSize,
+    artworkCacheStore: ArtworkCacheStore,
+): ImageBitmap? {
+    val cachedPath = artworkCacheStore.cachedPath(artworkCacheKey(artworkKey, imageSize)) ?: return null
+    return decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
+}
+
+internal suspend fun cacheArtworkAction(
+    artworkKey: String,
+    imageSize: ArtworkImageSize,
+    artworkCacheStore: ArtworkCacheStore,
+    libraryCacheStore: LibraryCacheStore,
+    musicRepository: RemoteMusicRepository,
+    canUseMediaServerRequests: () -> Boolean,
+    getArtists: () -> List<LibraryArtist>,
+    getSearchResults: () -> LibrarySearchResults,
+    getSimilarArtistsByArtist: () -> Map<String, List<LibraryArtist>>,
+    getPlaylists: () -> List<Playlist>,
+    getTracks: () -> List<Track>,
+    getArtworkLoadsInProgress: () -> Set<String>,
+    refreshAccessToken: () -> String?,
+    setAccessToken: (String?) -> Unit,
+    setCacheSizeBytes: (Long) -> Unit,
+): ImageBitmap? {
+    cachedArtworkBitmapAction(artworkKey, imageSize, artworkCacheStore)?.let { return it }
+    val cacheKey = artworkCacheKey(artworkKey, imageSize)
+    val cachedPath = artworkCacheStore.cachedPath(cacheKey) ?: run {
+        if (!canUseMediaServerRequests()) {
+            return null
+        }
+
+        val url = when {
+            artworkKey.startsWith(ALBUM_ARTWORK_KEY_PREFIX) ->
+                musicRepository.albumArtworkUrl(artworkKey.albumIdFromArtworkKey())
+            artworkKey.startsWith(ARTIST_ARTWORK_KEY_PREFIX) -> {
+                val artistId = artworkKey.artistIdFromArtworkKey()
+                val knownArtistHasId = (
+                    getArtists() + getSearchResults().artists + getSimilarArtistsByArtist().values.flatten()
+                    ).any { it.id == artistId }
+                if (!knownArtistHasId) {
+                    return null
+                }
+                musicRepository.artistArtworkUrl(artistId, size = imageSize.maxSizePx)
+            }
+            artworkKey.startsWith(PLAYLIST_ARTWORK_KEY_PREFIX) ->
+                musicRepository.playlistArtworkUrl(artworkKey.playlistIdFromArtworkKey(), size = imageSize.maxSizePx)
+            else -> musicRepository.artworkUrl(artworkKey)
+        }
+        setAccessToken(refreshAccessToken())
+        artworkCacheStore.cache(cacheKey, url)
+    }
+    val bitmap = decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
+    val downloadedKeys = downloadedArtworkCacheKeys(getPlaylists(), getTracks())
+    artworkCacheStore.trimToLimit(
+        maxBytes = ARTWORK_CACHE_LIMIT_BYTES,
+        keysToKeep = downloadedKeys + getArtworkLoadsInProgress() + cacheKey,
+    )
+    setCacheSizeBytes(
+        artworkCacheStore.sizeBytesExcluding(downloadedKeys) + libraryCacheStore.sizeBytes(),
+    )
+    return bitmap
+}
+
+internal fun loadArtworkAction(
+    scope: CoroutineScope,
+    artworkKey: String,
+    imageSize: ArtworkImageSize,
+    getArtworkBitmaps: () -> Map<String, ImageBitmap>,
+    setArtworkBitmaps: (Map<String, ImageBitmap>) -> Unit,
+    getArtworkLoadsInProgress: () -> Set<String>,
+    setArtworkLoadsInProgress: (Set<String>) -> Unit,
+    cacheArtwork: suspend (String, ArtworkImageSize) -> ImageBitmap?,
+    disableMediaPlaybackForAccount: () -> Unit,
+) {
+    val bitmapKey = artworkBitmapKey(artworkKey, imageSize)
+    if (getArtworkBitmaps().containsKey(bitmapKey) || bitmapKey in getArtworkLoadsInProgress()) {
+        return
+    }
+
+    setArtworkLoadsInProgress(getArtworkLoadsInProgress() + bitmapKey)
+    scope.launch {
+        runCatching {
+            cacheArtwork(artworkKey, imageSize)
+        }.onSuccess { bitmap ->
+            if (bitmap != null) {
+                setArtworkBitmaps(getArtworkBitmaps() + (bitmapKey to bitmap))
+            }
+        }.onFailure { error ->
+            if (error.isMediaPlaybackDisabledError()) {
+                disableMediaPlaybackForAccount()
+            }
+        }
+        setArtworkLoadsInProgress(getArtworkLoadsInProgress() - bitmapKey)
+    }
+}
+
+internal fun loadProfileAvatarAction(
+    scope: CoroutineScope,
+    currentAccount: Account,
+    getProfileAvatarLoadKey: () -> String?,
+    setProfileAvatarLoadKey: (String?) -> Unit,
+    getProfileAvatarBitmap: () -> ImageBitmap?,
+    setProfileAvatarBitmap: (ImageBitmap?) -> Unit,
+    getPlaylists: () -> List<Playlist>,
+    getTracks: () -> List<Track>,
+    getArtworkLoadsInProgress: () -> Set<String>,
+    artworkCacheStore: ArtworkCacheStore,
+    libraryCacheStore: LibraryCacheStore,
+    cachedArtworkBitmap: suspend (String, ArtworkImageSize) -> ImageBitmap?,
+    setCacheSizeBytes: (Long) -> Unit,
+) {
+    val avatarUrl = currentAccount.avatarUrl
+    val loadKey = "${currentAccount.id}:${avatarUrl.orEmpty()}"
+    if (getProfileAvatarLoadKey() == loadKey && getProfileAvatarBitmap() != null) {
+        return
+    }
+
+    setProfileAvatarLoadKey(loadKey)
+    setProfileAvatarBitmap(null)
+    if (avatarUrl.isNullOrBlank()) {
+        return
+    }
+
+    scope.launch {
+        val cacheKey = "profile_${currentAccount.id}_${avatarUrl.hashCode()}"
+        runCatching {
+            cachedArtworkBitmap(cacheKey, ArtworkImageSize.TrackList) ?: run {
+                val avatarCacheKey = artworkCacheKey(cacheKey, ArtworkImageSize.TrackList)
+                val cachedPath = artworkCacheStore.cache(avatarCacheKey, avatarUrl)
+                val downloadedKeys = downloadedArtworkCacheKeys(getPlaylists(), getTracks())
+                artworkCacheStore.trimToLimit(
+                    maxBytes = ARTWORK_CACHE_LIMIT_BYTES,
+                    keysToKeep = downloadedKeys + getArtworkLoadsInProgress() + avatarCacheKey,
+                )
+                setCacheSizeBytes(
+                    artworkCacheStore.sizeBytesExcluding(downloadedKeys) + libraryCacheStore.sizeBytes(),
+                )
+                decodeArtworkBitmap(cachedPath, ArtworkImageSize.TrackList.maxSizePx)
+            }
+        }.onSuccess { bitmap ->
+            if (getProfileAvatarLoadKey() == loadKey) {
+                setProfileAvatarBitmap(bitmap)
+            }
+        }
+    }
+}

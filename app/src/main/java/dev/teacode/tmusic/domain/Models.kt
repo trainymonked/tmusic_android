@@ -19,6 +19,7 @@ data class Account(
     val email: String,
     val avatarUrl: String? = null,
     val lastFmConnection: LastFmConnection? = null,
+    val canPlayMedia: Boolean = true,
 )
 
 data class Track(
@@ -33,14 +34,17 @@ data class Track(
     val playCount: Int,
     val artistId: String? = null,
     val artistIds: List<String> = emptyList(),
+    val artists: List<LibraryArtist> = emptyList(),
     val albumId: String? = null,
     val albumArtist: String? = null,
     val albumArtistId: String? = null,
+    val albumArtists: List<LibraryArtist> = emptyList(),
     val trackNumber: Int? = null,
     val discNumber: Int? = null,
     val releaseYear: Int? = null,
     val genre: String? = null,
     val isLiked: Boolean? = null,
+    val foundInLyrics: Boolean = false,
 )
 
 data class Playlist(
@@ -54,6 +58,7 @@ data class Playlist(
     val isFavorites: Boolean = false,
     val trackCount: Int = trackIds.size,
     val totalDurationSeconds: Int? = null,
+    val updatedAt: String? = null,
 )
 
 data class PlayerState(
@@ -102,12 +107,19 @@ data class LibraryArtistAlbums(
         get() = (albums + appearsOn).distinctBy { it.id }
 }
 
+data class RecentAlbumChange(
+    val type: String,
+    val latestTrackCreatedAt: String? = null,
+    val latestTrackUpdatedAt: String? = null,
+)
+
 data class LibraryAlbum(
     val id: String,
     val title: String,
     val artist: String,
     val artistId: String? = null,
     val artistIds: List<String> = emptyList(),
+    val artists: List<LibraryArtist> = emptyList(),
     val releaseYear: Int? = null,
     val genre: String? = null,
     val trackCount: Int = 0,
@@ -117,6 +129,10 @@ data class LibraryAlbum(
     val isOfflineEnabled: Boolean = false,
     val hasArtwork: Boolean = false,
     val totalDurationSeconds: Int? = null,
+    val recentChangeType: String? = null,
+    val isNewAlbum: Boolean = false,
+    val recentChange: RecentAlbumChange? = null,
+    val userAlbumCreatedAt: String? = null,
 )
 
 data class LibrarySearchResults(

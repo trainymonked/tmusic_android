@@ -14,7 +14,7 @@ interface MusicRepository {
     suspend fun saveAlbum(albumId: String): LibraryAlbum?
     suspend fun unsaveAlbum(albumId: String): LibraryAlbum?
     suspend fun albumTracks(albumId: String): List<Track>
-    suspend fun search(query: String, limit: Int = 10): LibrarySearchResults
+    suspend fun search(query: String, limit: Int = 10, offset: Int = 0): LibrarySearchResults
     suspend fun playlists(): List<Playlist>
     suspend fun tracks(): List<Track>
     suspend fun playlistTracks(playlistId: String): List<Track>
@@ -35,6 +35,7 @@ interface MusicRepository {
     suspend fun addTrackToPlaylist(playlistId: String, trackId: String): Playlist?
     suspend fun removeTrackFromPlaylist(playlistId: String, playlistTrackId: String): Playlist?
     suspend fun reorderPlaylistTracks(playlistId: String, playlistTrackIds: List<String>): Playlist?
+    suspend fun movePlaylistTrack(playlistId: String, playlistTrackId: String, position: Int): Playlist?
     suspend fun sendPlayEvent(
         clientEventId: String,
         trackId: String,

@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.data
 
 import android.content.Context
+import dev.teacode.tmusic.BuildConfig
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -33,6 +34,9 @@ class ArtworkCacheStore(context: Context) {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("X-TMusic-Platform", "android")
+            setRequestProperty("X-TMusic-Version-Code", BuildConfig.VERSION_CODE.toString())
+            setRequestProperty("X-TMusic-Version-Name", BuildConfig.VERSION_NAME)
         }
 
         try {

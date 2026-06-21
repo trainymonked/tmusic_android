@@ -96,7 +96,7 @@ private fun LibraryItemRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 9.dp),
+            .padding(horizontal = ScreenHorizontalPadding, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

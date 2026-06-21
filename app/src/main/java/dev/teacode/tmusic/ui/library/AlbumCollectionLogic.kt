@@ -10,7 +10,13 @@ internal fun List<LibraryAlbum>.updateAlbum(updatedAlbum: LibraryAlbum): List<Li
     }
     return map { album ->
         if (album.id == updatedAlbum.id) {
-            updatedAlbum.copy(totalDurationSeconds = updatedAlbum.totalDurationSeconds ?: album.totalDurationSeconds)
+            updatedAlbum.copy(
+                artist = updatedAlbum.artist.takeIf { it.isNotBlank() } ?: album.artist,
+                artistId = updatedAlbum.artistId ?: album.artistId,
+                artistIds = updatedAlbum.artistIds.ifEmpty { album.artistIds },
+                artists = updatedAlbum.artists.ifEmpty { album.artists },
+                totalDurationSeconds = updatedAlbum.totalDurationSeconds ?: album.totalDurationSeconds,
+            )
         } else {
             album
         }

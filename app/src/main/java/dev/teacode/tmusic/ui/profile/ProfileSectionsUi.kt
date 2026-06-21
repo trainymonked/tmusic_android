@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.runtime.Composable
 import androidx.compose.material3.MaterialTheme
 import dev.teacode.tmusic.data.AppUpdateInfo
+import dev.teacode.tmusic.ui.theme.AppThemeMode
 
 @Composable
 internal fun ProfileUpdateSection(
@@ -23,6 +24,21 @@ internal fun ProfileUpdateSection(
             actionLabel = actionLabel,
             onAction = onOpenUpdate,
             enabled = actionEnabled,
+        )
+    }
+}
+
+@Composable
+internal fun ProfileAppearanceSection(
+    themeMode: AppThemeMode,
+    onThemeModeChange: (AppThemeMode) -> Unit,
+) {
+    ProfileSettingsSection(title = "Appearance") {
+        ProfileThemeModeRow(
+            title = "Theme",
+            subtitle = "Dark, light, or system",
+            selectedMode = themeMode,
+            onModeSelected = onThemeModeChange,
         )
     }
 }
@@ -101,7 +117,6 @@ internal fun ProfileDownloadsSection(
 
 @Composable
 internal fun ProfileConnectionSection(
-    apiBaseUrl: String,
     useLocalBackend: Boolean,
     canUseNetwork: Boolean,
     syncMode: SyncMode,
@@ -122,11 +137,6 @@ internal fun ProfileConnectionSection(
             subtitle = "Use the local development backend",
             checked = useLocalBackend,
             onCheckedChange = onUseLocalBackendChange,
-        )
-        ProfileSettingDivider()
-        ProfileInfoRow(
-            title = "API server",
-            value = apiBaseUrl,
         )
         ProfileSettingDivider()
         ProfileStatusRow(

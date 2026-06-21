@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -78,8 +79,17 @@ fun HomeLoadingSkeleton(modifier: Modifier = Modifier) {
         ),
         label = "home-skeleton-offset",
     )
-    val base = MaterialTheme.colorScheme.surfaceContainer
-    val highlight = MaterialTheme.colorScheme.surfaceContainerHighest
+    val isLightTheme = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val base = if (isLightTheme) {
+        MaterialTheme.colorScheme.surfaceVariant
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+    val highlight = if (isLightTheme) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -88,7 +98,7 @@ fun HomeLoadingSkeleton(modifier: Modifier = Modifier) {
                 Brush.linearGradient(
                     colors = listOf(
                         Color.Transparent,
-                        highlight.copy(alpha = 0.72f),
+                        highlight,
                         Color.Transparent,
                     ),
                     start = Offset(offset, 0f),

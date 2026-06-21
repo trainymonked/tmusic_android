@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
@@ -19,7 +20,6 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +40,7 @@ internal fun PlaylistHeader(
     downloadState: DownloadState,
     downloadProgressPercent: Int?,
     isFavorites: Boolean,
+    canEdit: Boolean,
     canDownload: Boolean,
     hasPlayableTracks: Boolean,
     isActivePlaylist: Boolean,
@@ -51,6 +52,7 @@ internal fun PlaylistHeader(
     onShufflePlayPlaylist: () -> Unit,
     onTogglePlayback: () -> Unit,
     onDownloadPlaylist: () -> Unit,
+    onDeletePlaylistDownload: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -62,6 +64,8 @@ internal fun PlaylistHeader(
             bitmap = artworkBitmap,
             accentColor = stableUiColor(playlist.id),
             keepPreviousWhileLoading = true,
+            placeholderIcon = Icons.AutoMirrored.Filled.PlaylistPlay,
+            placeholderIconSize = 58.dp,
             modifier = Modifier
                 .size(176.dp)
                 .clip(RoundedCornerShape(8.dp)),
@@ -82,7 +86,7 @@ internal fun PlaylistHeader(
         if (!isFavorites) {
             IconButton(
                 onClick = onDeleteClick,
-                enabled = canDownload,
+                enabled = canEdit,
             ) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
@@ -91,7 +95,7 @@ internal fun PlaylistHeader(
             }
             IconButton(
                 onClick = onEditClick,
-                enabled = canDownload,
+                enabled = canEdit,
             ) {
                 Icon(
                     imageVector = Icons.Filled.Edit,
@@ -101,7 +105,10 @@ internal fun PlaylistHeader(
         }
     }
     Spacer(modifier = Modifier.height(12.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         if (isFavorites) {
             Button(
                 onClick = onShufflePlayPlaylist,
@@ -137,24 +144,15 @@ internal fun PlaylistHeader(
                 )
             }
         }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DownloadCircleButton(
-                downloadState = downloadState,
-                contentDescription = "Download playlist",
-                onClick = onDownloadPlaylist,
-                enabled = canDownload,
-                animateQueued = canDownload,
-            )
-            downloadProgressPercent?.let { percent ->
-                Text(
-                    text = "$percent%",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        CollectionDownloadControls(
+            downloadState = downloadState,
+            progressPercent = downloadProgressPercent,
+            isPaused = isPlaylistDownloadPaused(playlist.id),
+            enabled = canDownload,
+            downloadContentDescription = "Download playlist",
+            deleteContentDescription = "Delete playlist download",
+            onDownload = onDownloadPlaylist,
+            onDeleteDownload = onDeletePlaylistDownload,
+        )
     }
 }

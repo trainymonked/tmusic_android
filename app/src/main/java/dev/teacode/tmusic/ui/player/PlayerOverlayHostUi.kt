@@ -3,13 +3,12 @@ package dev.teacode.tmusic.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.domain.Track
 import dev.teacode.tmusic.domain.TrackLyrics
@@ -23,7 +22,6 @@ internal fun PlayerOverlayHost(
     playerState: PlayerState,
     artworkBitmap: ImageBitmap?,
     artworkBitmaps: Map<String, ImageBitmap>,
-    artworkTransitionDirection: Int,
     playbackBufferedFraction: Float,
     canSkipTracks: Boolean,
     shuffleEnabled: Boolean,
@@ -42,6 +40,7 @@ internal fun PlayerOverlayHost(
     queueCurrentIndex: Int,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
+    onSwipePrevious: () -> Unit,
     onShuffleChange: (Boolean) -> Unit,
     onRepeatModeChange: (PlaybackRepeatMode) -> Unit,
     onToggleCurrentFavorite: (() -> Unit)?,
@@ -62,13 +61,32 @@ internal fun PlayerOverlayHost(
     onReorderQueueTracks: (List<Int>) -> Unit,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
 ) {
-    val collapsedPlayerOffsetPx = shellHeightPx - with(LocalDensity.current) { 140.dp.toPx() }
+    val currentTrackId = playerState.currentTrack?.id
+    val boundedQueueIndex = queueCurrentIndex
+        .takeIf { index -> queueTracks.getOrNull(index)?.id == currentTrackId }
+        ?: currentTrackId
+            ?.let { trackId -> queueTracks.indexOfFirst { it.id == trackId } }
+            ?.takeIf { it >= 0 }
+        ?: queueCurrentIndex.coerceIn(0, (queueTracks.size - 1).coerceAtLeast(0))
+    val previousTrack = queueTracks.takeIf { it.size > 1 }?.let { tracks ->
+        tracks[(boundedQueueIndex - 1).floorMod(tracks.size)]
+    }
+    val nextTrack = queueTracks.takeIf { it.size > 1 }?.let { tracks ->
+        tracks[(boundedQueueIndex + 1).floorMod(tracks.size)]
+    }
+    val previousArtworkKey = previousTrack?.listArtworkKey()
+    val nextArtworkKey = nextTrack?.listArtworkKey()
+    LaunchedEffect(previousArtworkKey, nextArtworkKey) {
+        previousArtworkKey?.let { onRequestArtwork(it, ArtworkImageSize.FullPlayer) }
+        nextArtworkKey?.let { onRequestArtwork(it, ArtworkImageSize.FullPlayer) }
+    }
     if (fullPlayerOpen || fullPlayerRevealProgress > 0f) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    translationY = (1f - fullPlayerRevealProgress) * collapsedPlayerOffsetPx.coerceAtLeast(1f)
+                    translationY = (1f - fullPlayerRevealProgress.coerceIn(0f, 1f)) *
+                        shellHeightPx.coerceAtLeast(1f)
                     clip = true
                     shape = RectangleShape
                     compositingStrategy = CompositingStrategy.Offscreen
@@ -77,7 +95,14 @@ internal fun PlayerOverlayHost(
             FullPlayerScreen(
                 playerState = playerState,
                 artworkBitmap = artworkBitmap,
-                artworkTransitionDirection = artworkTransitionDirection,
+                previousTrack = previousTrack,
+                previousArtworkBitmap = previousTrack?.let { track ->
+                    artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.FullPlayer)
+                },
+                nextTrack = nextTrack,
+                nextArtworkBitmap = nextTrack?.let { track ->
+                    artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.FullPlayer)
+                },
                 playbackBufferedFraction = playbackBufferedFraction,
                 canSkip = canSkipTracks,
                 shuffleEnabled = shuffleEnabled,
@@ -90,6 +115,7 @@ internal fun PlayerOverlayHost(
                 sourceDetail = playerSourceDetail,
                 onSkipPrevious = onSkipPrevious,
                 onSkipNext = onSkipNext,
+                onSwipePrevious = onSwipePrevious,
                 onShuffleChange = onShuffleChange,
                 onRepeatModeChange = onRepeatModeChange,
                 isFavorite = currentTrackFavorite,

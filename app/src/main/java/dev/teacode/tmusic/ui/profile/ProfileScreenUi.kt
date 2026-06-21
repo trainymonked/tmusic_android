@@ -31,12 +31,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.LastFmConnection
+import dev.teacode.tmusic.ui.theme.LocalAppThemeController
 
 @Composable
 internal fun ProfileScreen(
     account: Account,
     avatarBitmap: ImageBitmap?,
-    apiBaseUrl: String,
     useLocalBackend: Boolean,
     canUseNetwork: Boolean,
     syncMode: SyncMode,
@@ -71,6 +71,7 @@ internal fun ProfileScreen(
     onCheckUpdates: () -> Unit,
     onSignOut: () -> Unit,
 ) {
+    val themeController = LocalAppThemeController.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
@@ -110,6 +111,12 @@ internal fun ProfileScreen(
             )
         }
         item {
+            ProfileAppearanceSection(
+                themeMode = themeController.themeMode,
+                onThemeModeChange = themeController.onThemeModeChange,
+            )
+        }
+        item {
             ProfilePlaybackSection(
                 showLyrics = showLyrics,
                 crossfadeSeconds = crossfadeSeconds,
@@ -132,7 +139,6 @@ internal fun ProfileScreen(
         }
         item {
             ProfileConnectionSection(
-                apiBaseUrl = apiBaseUrl,
                 useLocalBackend = useLocalBackend,
                 canUseNetwork = canUseNetwork,
                 syncMode = syncMode,

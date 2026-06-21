@@ -37,6 +37,23 @@ internal const val APP_UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
 internal const val ARTWORK_CACHE_LIMIT_BYTES = 128L * 1024L * 1024L
 internal const val PENDING_PLAY_EVENT_SYNC_BATCH_SIZE = 20
 internal const val HOME_ARTIST_PREVIEW_LIMIT = 12
+internal const val HOME_RECENT_ALBUM_PAGE_LIMIT = 10
+internal const val HOME_RECENT_ALBUM_MAX_COUNT = 50
+
+internal data class RecentAlbumsPagingState(
+    val loadingMore: Boolean = false,
+    val nextOffset: Int = 0,
+    val hasMore: Boolean = true,
+)
+
+internal data class LibraryPagingState(
+    val artistLoadingMore: Boolean = false,
+    val albumLoadingMore: Boolean = false,
+    val artistNextOffset: Int = 0,
+    val albumNextOffset: Int = 0,
+    val artistHasMore: Boolean = true,
+    val albumHasMore: Boolean = true,
+)
 internal const val SCREEN_PAGE_LIMIT = 50
 internal const val DETAIL_TRACK_PAGE_LIMIT = 100
 internal const val GAPLESS_PREFETCH_LOOKAHEAD = 4
@@ -79,7 +96,7 @@ internal data class LoadedLibraryState(
     val account: Account?,
     val playlists: List<Playlist>? = null,
     val tracks: List<Track>? = null,
-    val recentTracks: List<Track>? = null,
+    val recentAlbums: List<LibraryAlbum>? = null,
     val trackCount: Int? = null,
     val artists: List<LibraryArtist>? = null,
     val albums: List<LibraryAlbum>? = null,

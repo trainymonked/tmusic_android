@@ -24,11 +24,7 @@ internal fun PlaylistPayload.mergeWithCachedPlaylistData(
             tracks = cachedTracks,
         )
     val currentPlaylist = cachedPlaylists.firstOrNull { it.id == rawPlaylist.id }
-    val loadedPlaylist = rawPlaylist.copy(
-        isOfflineEnabled = rawPlaylist.isOfflineEnabled || currentPlaylist?.isOfflineEnabled == true,
-        isFavorites = rawPlaylist.isFavorites || currentPlaylist?.isFavorites == true,
-        totalDurationSeconds = rawPlaylist.totalDurationSeconds ?: currentPlaylist?.totalDurationSeconds,
-    )
+    val loadedPlaylist = rawPlaylist.mergeKnownPlaylistState(currentPlaylist)
     val mergedTracks = if (tracks.isEmpty()) {
         cachedTracks
     } else {
