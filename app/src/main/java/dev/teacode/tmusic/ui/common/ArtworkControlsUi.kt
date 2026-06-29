@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
@@ -323,17 +324,23 @@ private fun CollectionDownloadButton(
             downloadState == DownloadState.Downloaded -> DownloadStateBadge(
                 imageVector = Icons.Filled.CheckCircle,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.BottomEnd),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 5.dp, bottom = 5.dp),
             )
             isPaused -> DownloadStateBadge(
                 imageVector = Icons.Filled.PlayArrow,
                 tint = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.align(Alignment.BottomEnd),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 5.dp, bottom = 5.dp),
             )
             isError -> DownloadStateBadge(
                 imageVector = Icons.Filled.Close,
                 tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.align(Alignment.BottomEnd),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 5.dp, bottom = 5.dp),
             )
         }
         content()

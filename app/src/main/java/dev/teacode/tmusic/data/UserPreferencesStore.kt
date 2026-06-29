@@ -8,6 +8,12 @@ import dev.teacode.tmusic.domain.ScrobbleState
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class PendingDownloadedAppUpdate(
+    val version: String,
+    val downloadId: Long,
+    val targetVersionCode: Int?,
+)
+
 class UserPreferencesStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
         USER_PREFERENCES_NAME,
@@ -173,6 +179,44 @@ class UserPreferencesStore(context: Context) {
             .apply()
     }
 
+    fun pendingDownloadedAppUpdate(): PendingDownloadedAppUpdate? {
+        val raw = preferences.getString(KEY_PENDING_DOWNLOADED_APP_UPDATE, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        return runCatching {
+            val json = JSONObject(raw)
+            PendingDownloadedAppUpdate(
+                version = json.optString("version").meaningfulStringOrNull() ?: return null,
+                downloadId = json.optLong("downloadId").takeIf { it > 0L } ?: return null,
+                targetVersionCode = json.optIntOrNull("targetVersionCode"),
+            )
+        }.getOrNull()
+    }
+
+    fun setPendingDownloadedAppUpdate(
+        version: String,
+        downloadId: Long,
+        targetVersionCode: Int?,
+    ) {
+        val normalizedVersion = version.meaningfulStringOrNull() ?: return
+        if (downloadId <= 0L) {
+            return
+        }
+        val json = JSONObject()
+            .put("version", normalizedVersion)
+            .put("downloadId", downloadId)
+            .put("targetVersionCode", targetVersionCode)
+        preferences.edit()
+            .putString(KEY_PENDING_DOWNLOADED_APP_UPDATE, json.toString())
+            .apply()
+    }
+
+    fun clearPendingDownloadedAppUpdate() {
+        preferences.edit()
+            .remove(KEY_PENDING_DOWNLOADED_APP_UPDATE)
+            .apply()
+    }
+
     fun offlineAlbumIds(): Set<String> {
         return preferences.getStringSet(KEY_OFFLINE_ALBUM_IDS, emptySet()).orEmpty()
     }
@@ -325,6 +369,7 @@ class UserPreferencesStore(context: Context) {
         const val KEY_LAST_UPDATE_CHECK_EPOCH_MS = "last_update_check_epoch_ms"
         const val KEY_UPDATE_CHECK_SOURCE = "update_check_source"
         const val KEY_CACHED_APP_UPDATE = "cached_app_update"
+        const val KEY_PENDING_DOWNLOADED_APP_UPDATE = "pending_downloaded_app_update"
         const val KEY_OFFLINE_ALBUM_IDS = "offline_album_ids"
         const val KEY_LASTFM_USERNAME = "lastfm_username"
         const val KEY_LASTFM_STATE = "lastfm_state"

@@ -36,7 +36,8 @@ import dev.teacode.tmusic.data.PlaybackStateStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.UserPreferencesStore
-import dev.teacode.tmusic.data.isAppVersionNewer
+import dev.teacode.tmusic.data.enforcedForCurrentApp
+import dev.teacode.tmusic.data.isAvailableForCurrentApp
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.domain.RecentLibraryItem
@@ -139,20 +140,19 @@ internal fun TMusicAppControllerContent(
         val gaplessMediaUrlsState = rememberUpdatedState(gaplessMediaUrls)
         val repeatModeState = rememberUpdatedState(repeatMode)
         val appUpdateController = remember {
+            val cachedUpdate = userPreferencesStore.cachedAppUpdate()?.enforcedForCurrentApp()
+            val initialUpdate = cachedUpdate?.takeIf { update ->
+                update.isAvailableForCurrentApp(BuildConfig.VERSION_NAME)
+            }
+            if (cachedUpdate != null && initialUpdate == null) {
+                userPreferencesStore.clearCachedAppUpdate()
+            }
             AppUpdateController(
                 context = context,
                 userPreferencesStore = userPreferencesStore,
                 appUpdateChecker = appUpdateChecker,
                 currentVersion = BuildConfig.VERSION_NAME,
-                initialUpdate = userPreferencesStore.cachedAppUpdate()
-                    ?.takeIf { update ->
-                        update.forceUpdate ||
-                            if (update.latestVersionCode != null) {
-                                update.latestVersionCode > BuildConfig.VERSION_CODE
-                            } else {
-                                isAppVersionNewer(update.version, BuildConfig.VERSION_NAME)
-                            }
-                    },
+                initialUpdate = initialUpdate,
                 onNotice = { message -> libraryNotice = message },
                 onError = { message -> libraryError = message },
             )

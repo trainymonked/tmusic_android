@@ -67,24 +67,24 @@ class AppUpdateChecker(
 }
 
 fun AppUpdateInfo.isRequiredForCurrentApp(): Boolean {
-    return forceUpdate || minSupportedVersionCode?.let { BuildConfig.VERSION_CODE < it } == true
+    return minSupportedVersionCode?.let { BuildConfig.VERSION_CODE < it } == true
 }
 
 fun AppUpdateInfo.isAvailableForCurrentApp(currentVersion: String): Boolean {
-    return isRequiredForCurrentApp() ||
-        if (latestVersionCode != null) {
-            latestVersionCode > BuildConfig.VERSION_CODE
-        } else {
-            isAppVersionNewer(version, currentVersion)
-        }
+    if (isRequiredForCurrentApp()) {
+        return true
+    }
+    latestVersionCode?.let { versionCode ->
+        return versionCode > BuildConfig.VERSION_CODE
+    }
+    if (minSupportedVersionCode != null && pageUrl.isBlank() && downloadUrl.isBlank()) {
+        return false
+    }
+    return isAppVersionNewer(version, currentVersion)
 }
 
 fun AppUpdateInfo.enforcedForCurrentApp(): AppUpdateInfo {
-    return if (isRequiredForCurrentApp() && !forceUpdate) {
-        copy(forceUpdate = true)
-    } else {
-        this
-    }
+    return copy(forceUpdate = isRequiredForCurrentApp())
 }
 
 private fun String.normalizedVersionTag(): String {
@@ -133,7 +133,7 @@ private fun AppUpdateInfo.withServerPolicy(policy: AppUpdateInfo?): AppUpdateInf
     }
     return copy(
         minSupportedVersionCode = policy.minSupportedVersionCode,
-        forceUpdate = policy.forceUpdate || policy.isRequiredForCurrentApp(),
+        forceUpdate = policy.isRequiredForCurrentApp(),
         blockingScopes = policy.blockingScopes,
     )
 }

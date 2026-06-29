@@ -57,6 +57,7 @@ internal class CollectionDownloadPauseRegistry {
 }
 
 private val collectionDownloadPauseRegistry = CollectionDownloadPauseRegistry()
+private const val COLLECTION_DOWNLOAD_TRACK_PAGE_LIMIT = 500
 
 internal fun resumePlaylistDownloadPause(id: String) {
     collectionDownloadPauseRegistry.resumePlaylist(id)
@@ -244,7 +245,7 @@ internal fun deletePlaylistDownloadAction(
     scope.launch {
         playlistDownloadJobs[playlist.id]?.cancel()
         setPlaylistDownloadJobs(playlistDownloadJobs - playlist.id)
-        collectionDownloadPauseRegistry.resumePlaylist(playlist.id)
+        collectionDownloadPauseRegistry.pausePlaylist(playlist.id)
         val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
         val nextPlaylists = playlists.updatePlaylist(
             updatedPlaylist = currentPlaylist.copy(isOfflineEnabled = false),
@@ -302,7 +303,7 @@ internal fun deleteAlbumDownloadAction(
     scope.launch {
         albumDownloadJobs[album.id]?.cancel()
         setAlbumDownloadJobs(albumDownloadJobs - album.id)
-        collectionDownloadPauseRegistry.resumeAlbum(album.id)
+        collectionDownloadPauseRegistry.pauseAlbum(album.id)
         updateAlbumOfflineFlag(album.id, false)
         val nextOfflineAlbumIds = offlineAlbumIds - album.id
         val deletePlan = albumDownloadDeletePlan(
@@ -403,7 +404,7 @@ internal fun downloadPlaylistAction(
                 ?: loadPlaylistDownloadSource(
                     musicRepository = musicRepository,
                     playlist = optimisticPlaylist,
-                    pageLimit = DETAIL_TRACK_PAGE_LIMIT,
+                    pageLimit = COLLECTION_DOWNLOAD_TRACK_PAGE_LIMIT,
                     mergePage = { loadedPlaylist, payload, append ->
                         payload.mergePlaylistTrackPage(
                             playlist = optimisticPlaylist,
@@ -608,7 +609,7 @@ internal fun downloadAlbumAction(
                 musicRepository = musicRepository,
                 album = album,
                 initialTracks = albumTracks,
-                pageLimit = DETAIL_TRACK_PAGE_LIMIT,
+                pageLimit = COLLECTION_DOWNLOAD_TRACK_PAGE_LIMIT,
             )
             source.loadError?.let(markServerUnavailable)
             if (source.loadError != null && source.tracks.isEmpty()) {

@@ -1191,9 +1191,9 @@ class TMusicApiClient(
         const val PLAYLIST_PAGE_LIMIT = 50
         const val PLAYLIST_TRACK_PAGE_LIMIT = 50
         const val PLAYLIST_DETAIL_TRACK_PAGE_LIMIT = 100
-        const val PLAYLIST_FULL_TRACK_PAGE_LIMIT = 200
+        const val PLAYLIST_FULL_TRACK_PAGE_LIMIT = 500
         const val FAVORITES_FULL_TRACK_PAGE_LIMIT = 500
-        const val TRACK_LIST_PAGE_LIMIT = 100
+        const val TRACK_LIST_PAGE_LIMIT = 500
         const val TRACK_CATALOG_PAGE_LIMIT = 500
         const val TRACK_SEARCH_PAGE_LIMIT = 100
         const val LIBRARY_ARTIST_ALBUMS_MAX_REQUESTS = 200

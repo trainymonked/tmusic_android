@@ -9,10 +9,13 @@ import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.data.AppUpdateChecker
 import dev.teacode.tmusic.data.AppUpdateInfo
+import dev.teacode.tmusic.data.PendingDownloadedAppUpdate
 import dev.teacode.tmusic.data.UserPreferencesStore
 import dev.teacode.tmusic.data.enforcedForCurrentApp
+import dev.teacode.tmusic.data.isAppVersionNewer
 import dev.teacode.tmusic.data.isAvailableForCurrentApp
 import kotlinx.coroutines.CancellationException
 
@@ -53,12 +56,23 @@ internal class AppUpdateController(
     val actionEnabled: Boolean
         get() = downloadId == null
 
+    init {
+        if (availableUpdate?.isAvailableForCurrentApp(currentVersion) != true) {
+            clearAvailableUpdate()
+        }
+        removeInstalledDownloadedUpdateIfNeeded()
+    }
+
     fun dismissDialog() {
         dialogUpdate = null
     }
 
     fun applyServerUpdate(update: AppUpdateInfo, prompt: Boolean) {
         val enforcedUpdate = update.enforcedForCurrentApp()
+        if (!enforcedUpdate.isAvailableForCurrentApp(currentVersion)) {
+            clearAvailableUpdate()
+            return
+        }
         Log.d(
             APP_UPDATE_LOG_TAG,
             "server update version=${enforcedUpdate.version} latestCode=${enforcedUpdate.latestVersionCode} " +
@@ -72,6 +86,10 @@ internal class AppUpdateController(
             }
             dialogUpdate = enforcedUpdate
         }
+    }
+
+    fun showDetails(update: AppUpdateInfo?) {
+        dialogUpdate = update ?: availableUpdate
     }
 
     fun openUpdate(update: AppUpdateInfo?) {
@@ -105,6 +123,8 @@ internal class AppUpdateController(
             )
             if (manual && !canCheck) {
                 onError("Connect to the internet before checking updates.")
+            } else if (manual && checkInProgress) {
+                onNotice("Update check is already running.")
             }
             return
         }
@@ -112,6 +132,7 @@ internal class AppUpdateController(
         userPreferencesStore.setLastUpdateCheckEpochMs(now)
         checkInProgress = true
         Log.d(APP_UPDATE_LOG_TAG, "run check manual=$manual currentVersion=$currentVersion")
+        var checkError: Throwable? = null
         val update = try {
             appUpdateChecker.latestUpdate(currentVersion)
         } catch (error: CancellationException) {
@@ -119,6 +140,7 @@ internal class AppUpdateController(
             throw error
         } catch (error: Throwable) {
             Log.w(APP_UPDATE_LOG_TAG, "check failed manual=$manual", error)
+            checkError = error
             null
         } finally {
             checkInProgress = false
@@ -132,9 +154,17 @@ internal class AppUpdateController(
             if (manual) {
                 onNotice("Update ${update.version} is available.")
             }
-        } else if (availableUpdate?.isAvailableForCurrentApp(currentVersion) != true) {
+        } else if (checkError != null) {
+            if (manual) {
+                onError("Could not check updates.")
+            }
+        } else if (availableUpdate?.isAvailableForCurrentApp(currentVersion) == true) {
+            if (manual) {
+                showDetails(availableUpdate)
+            }
+        } else {
             Log.d(APP_UPDATE_LOG_TAG, "no newer update available")
-            userPreferencesStore.clearCachedAppUpdate()
+            clearAvailableUpdate()
             if (manual) {
                 onNotice("No updates found.")
             }
@@ -142,17 +172,33 @@ internal class AppUpdateController(
     }
 
     fun onDownloaded(uri: Uri?) {
+        val completedDownloadId = downloadId
+        val downloadedUpdate = availableUpdate
+        if (
+            completedDownloadId == null &&
+            downloadedVersion == downloadedUpdate?.version &&
+            installUri == uri
+        ) {
+            return
+        }
         downloadId = null
-        downloadedVersion = availableUpdate?.version
+        downloadedVersion = downloadedUpdate?.version
         installUri = uri
         downloadStatus = if (uri != null) {
             "Ready to install."
         } else {
             "Downloaded, but installer is unavailable."
         }
+        if (uri != null && completedDownloadId != null && downloadedUpdate != null) {
+            userPreferencesStore.setPendingDownloadedAppUpdate(
+                version = downloadedUpdate.version,
+                downloadId = completedDownloadId,
+                targetVersionCode = downloadedUpdate.latestVersionCode ?: downloadedUpdate.minSupportedVersionCode,
+            )
+        }
         onNotice(downloadStatus)
         if (uri != null) {
-            availableUpdate?.let { dialogUpdate = it }
+            downloadedUpdate?.let { dialogUpdate = it }
         }
     }
 
@@ -211,6 +257,45 @@ internal class AppUpdateController(
         }.onFailure {
             onError("Could not open the update link.")
         }
+    }
+
+    private fun clearAvailableUpdate() {
+        availableUpdate = null
+        dialogUpdate = null
+        downloadedVersion = null
+        installUri = null
+        userPreferencesStore.clearCachedAppUpdate()
+    }
+
+    private fun removeInstalledDownloadedUpdateIfNeeded() {
+        val pendingUpdate = userPreferencesStore.pendingDownloadedAppUpdate() ?: return
+        if (!pendingUpdate.isInstalled()) {
+            return
+        }
+        runCatching {
+            context.getSystemService(DownloadManager::class.java).remove(pendingUpdate.downloadId)
+        }.onSuccess {
+            Log.d(
+                APP_UPDATE_LOG_TAG,
+                "removed installed update apk version=${pendingUpdate.version} downloadId=${pendingUpdate.downloadId}",
+            )
+        }.onFailure { error ->
+            Log.w(
+                APP_UPDATE_LOG_TAG,
+                "failed to remove installed update apk downloadId=${pendingUpdate.downloadId}",
+                error,
+            )
+        }
+        userPreferencesStore.clearPendingDownloadedAppUpdate()
+    }
+
+    private fun PendingDownloadedAppUpdate.isInstalled(): Boolean {
+        targetVersionCode?.let { requiredVersionCode ->
+            if (BuildConfig.VERSION_CODE >= requiredVersionCode) {
+                return true
+            }
+        }
+        return !isAppVersionNewer(version, currentVersion)
     }
 
     private companion object {

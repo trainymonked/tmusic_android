@@ -89,9 +89,9 @@ internal fun ProfileScreen(
                 ProfileUpdateSection(
                     update = update,
                     updateStatus = appUpdateController.downloadStatus,
-                    actionLabel = appUpdateController.actionLabel,
-                    actionEnabled = appUpdateController.actionEnabled,
-                    onOpenUpdate = { appUpdateController.openUpdate(update) },
+                    actionLabel = "Details",
+                    actionEnabled = true,
+                    onOpenUpdate = { appUpdateController.showDetails(update) },
                 )
             }
         }
