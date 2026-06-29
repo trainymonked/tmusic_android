@@ -64,6 +64,7 @@ internal fun PlaylistContent(
     canPlayFromNetwork: Boolean,
     offlinePlayableTrackIds: Set<String>,
     downloadedTrackIds: Set<String>,
+    isDownloadActive: Boolean,
     onTogglePlayback: () -> Unit,
     artworkBitmaps: Map<String, ImageBitmap>,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
@@ -174,6 +175,7 @@ internal fun PlaylistContent(
                         downloadState = playlistDownloadState,
                         downloadProgressPercent = downloadProgressPercent,
                         isFavorites = isFavorites,
+                        isDownloadActive = isDownloadActive,
                         canEdit = canDownload,
                         canDownload = canDownloadMedia,
                         hasPlayableTracks = displayedItems.any { it.track.id in playableTrackIds },
@@ -204,10 +206,10 @@ internal fun PlaylistContent(
             } else {
                 itemsIndexed(
                     displayedItems,
-                    key = { index, item -> item.playlistTrackId ?: "${item.track.id}:$index" },
+                    key = { index, item -> "${item.playlistTrackId ?: item.track.id}:$index" },
                 ) { index, item ->
                     val track = item.track
-                    val itemKey = item.playlistTrackId ?: "${track.id}:$index"
+                    val itemKey = "${item.playlistTrackId ?: track.id}:$index"
                     TrackRow(
                         track = track,
                         artworkBitmap = artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.TrackList),

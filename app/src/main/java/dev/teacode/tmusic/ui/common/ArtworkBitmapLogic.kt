@@ -19,6 +19,13 @@ internal fun artworkCacheKey(
     artworkKey: String,
     imageSize: ArtworkImageSize,
 ): String {
+    return artworkKey
+}
+
+internal fun legacyArtworkCacheKey(
+    artworkKey: String,
+    imageSize: ArtworkImageSize,
+): String {
     return artworkBitmapKey(artworkKey, imageSize)
 }
 

@@ -13,6 +13,15 @@ enum class ScrobbleState {
     Error,
 }
 
+enum class ArtistSortOption(
+    val apiSortBy: String,
+    val apiSortDirection: String,
+) {
+    Name("name", "asc"),
+    TrackCount("trackCount", "desc"),
+    LatestReleases("latestReleaseAt", "desc"),
+}
+
 data class Account(
     val id: String,
     val displayName: String,
@@ -95,6 +104,7 @@ data class LibraryArtist(
     val albumCount: Int = 0,
     val trackCount: Int = 0,
     val representativeAlbumId: String? = null,
+    val latestReleaseYear: Int? = null,
     val similarity: ArtistSimilarity? = null,
 )
 

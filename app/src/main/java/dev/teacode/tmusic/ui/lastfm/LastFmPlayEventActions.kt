@@ -8,6 +8,169 @@ import dev.teacode.tmusic.domain.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
+internal fun sendNowPlayingEventAction(
+    scope: CoroutineScope,
+    activeEvent: ActivePlayEvent,
+    track: Track?,
+    force: Boolean,
+    getLastFmConnected: () -> Boolean,
+    getScrobblingPaused: () -> Boolean,
+    canUseServerRequests: () -> Boolean,
+    canSendPlayEvents: () -> Boolean,
+    getNowPlayingEventIds: () -> Set<String>,
+    setNowPlayingEventIds: (Set<String>) -> Unit,
+    getNowPlayingTrackIdsInFlight: () -> Set<String>,
+    setNowPlayingTrackIdsInFlight: (Set<String>) -> Unit,
+    getNowPlayingTrackId: () -> String?,
+    setNowPlayingTrackId: (String?) -> Unit,
+    musicRepository: RemoteMusicRepository,
+    refreshAccessToken: () -> String?,
+    setAccessToken: (String?) -> Unit,
+    markServerUnavailable: (Throwable) -> Unit,
+) {
+    track ?: return
+    if (!getLastFmConnected() || getScrobblingPaused()) {
+        return
+    }
+    if (activeEvent.trackId in getNowPlayingTrackIdsInFlight()) {
+        return
+    }
+    if (!force && activeEvent.clientEventId in getNowPlayingEventIds()) {
+        return
+    }
+    if (getNowPlayingTrackId() == activeEvent.trackId) {
+        return
+    }
+    if (force && !canUseServerRequests()) {
+        return
+    } else if (!force && !canSendPlayEvents()) {
+        return
+    }
+
+    setNowPlayingEventIds(getNowPlayingEventIds() + activeEvent.clientEventId)
+    setNowPlayingTrackIdsInFlight(getNowPlayingTrackIdsInFlight() + activeEvent.trackId)
+    scope.launch {
+        runCatching {
+            musicRepository.sendNowPlaying(activeEvent.trackId)
+        }.onSuccess {
+            setAccessToken(refreshAccessToken())
+            setNowPlayingTrackIdsInFlight(getNowPlayingTrackIdsInFlight() - activeEvent.trackId)
+            setNowPlayingTrackId(activeEvent.trackId)
+        }.onFailure {
+            setNowPlayingEventIds(getNowPlayingEventIds() - activeEvent.clientEventId)
+            setNowPlayingTrackIdsInFlight(getNowPlayingTrackIdsInFlight() - activeEvent.trackId)
+            markServerUnavailable(it)
+        }
+    }
+}
+
+internal fun clearNowPlayingEventAction(
+    activeEvent: ActivePlayEvent?,
+    currentTrackId: String?,
+    getNowPlayingTrackId: () -> String?,
+    setNowPlayingTrackId: (String?) -> Unit,
+    getNowPlayingEventIds: () -> Set<String>,
+    setNowPlayingEventIds: (Set<String>) -> Unit,
+    getNowPlayingTrackIdsInFlight: () -> Set<String>,
+    setNowPlayingTrackIdsInFlight: (Set<String>) -> Unit,
+) {
+    activeEvent?.let { event ->
+        setNowPlayingEventIds(getNowPlayingEventIds() - event.clientEventId)
+        setNowPlayingTrackIdsInFlight(getNowPlayingTrackIdsInFlight() - event.trackId)
+    }
+    val trackId = activeEvent?.trackId ?: currentTrackId
+    if (trackId != null && getNowPlayingTrackId() == trackId) {
+        setNowPlayingTrackId(null)
+    } else if (activeEvent == null) {
+        setNowPlayingTrackId(null)
+    }
+}
+
+internal fun ensureActivePlayEventAction(
+    track: Track,
+    forceNew: Boolean,
+    getLastFmConnected: () -> Boolean,
+    getScrobblingPaused: () -> Boolean,
+    getActivePlayEvent: () -> ActivePlayEvent?,
+    setActivePlayEvent: (ActivePlayEvent?) -> Unit,
+    sendNowPlayingEvent: (ActivePlayEvent, Track, Boolean) -> Unit,
+) {
+    if (!getLastFmConnected() || getScrobblingPaused()) {
+        setActivePlayEvent(null)
+        return
+    }
+    val activeEvent = getActivePlayEvent()
+    if (!forceNew && activeEvent?.trackId == track.id) {
+        sendNowPlayingEvent(activeEvent, track, false)
+        return
+    }
+    val nextEvent = newActivePlayEvent(track)
+    setActivePlayEvent(nextEvent)
+    sendNowPlayingEvent(nextEvent, track, false)
+}
+
+internal fun queuePendingPlayEventAction(
+    activeEvent: ActivePlayEvent,
+    getLastFmConnected: () -> Boolean,
+    getScrobblingPaused: () -> Boolean,
+    getActivePlayEvent: () -> ActivePlayEvent?,
+    setActivePlayEvent: (ActivePlayEvent?) -> Unit,
+    getNowPlayingEventIds: () -> Set<String>,
+    setNowPlayingEventIds: (Set<String>) -> Unit,
+    getNowPlayingTrackIdsInFlight: () -> Set<String>,
+    setNowPlayingTrackIdsInFlight: (Set<String>) -> Unit,
+    getNowPlayingTrackId: () -> String?,
+    setNowPlayingTrackId: (String?) -> Unit,
+    pendingPlayEventStore: PendingPlayEventStore,
+    setPendingPlayEventCount: (Int) -> Unit,
+    getLastFmConnection: () -> LastFmConnection,
+    setLastFmConnection: (LastFmConnection) -> Unit,
+    userPreferencesStore: UserPreferencesStore,
+    savePlaybackSnapshot: () -> Unit,
+) {
+    if (!getLastFmConnected() || getScrobblingPaused()) {
+        return
+    }
+    pendingPlayEventStore.append(activeEvent.toPendingPlayEvent())
+    val pendingCount = pendingPlayEventStore.count()
+    setPendingPlayEventCount(pendingCount)
+    val nextConnection = getLastFmConnection().copy(pendingScrobbles = pendingCount)
+    setLastFmConnection(nextConnection)
+    userPreferencesStore.setLastFmConnection(nextConnection)
+    if (getActivePlayEvent()?.clientEventId == activeEvent.clientEventId) {
+        setActivePlayEvent(null)
+        setNowPlayingEventIds(getNowPlayingEventIds() - activeEvent.clientEventId)
+        setNowPlayingTrackIdsInFlight(getNowPlayingTrackIdsInFlight() - activeEvent.trackId)
+        if (getNowPlayingTrackId() == activeEvent.trackId) {
+            setNowPlayingTrackId(null)
+        }
+        savePlaybackSnapshot()
+    }
+}
+
+internal fun discardActivePlayEventAction(
+    activeEvent: ActivePlayEvent,
+    getActivePlayEvent: () -> ActivePlayEvent?,
+    setActivePlayEvent: (ActivePlayEvent?) -> Unit,
+    getNowPlayingEventIds: () -> Set<String>,
+    setNowPlayingEventIds: (Set<String>) -> Unit,
+    getNowPlayingTrackIdsInFlight: () -> Set<String>,
+    setNowPlayingTrackIdsInFlight: (Set<String>) -> Unit,
+    getNowPlayingTrackId: () -> String?,
+    setNowPlayingTrackId: (String?) -> Unit,
+    savePlaybackSnapshot: () -> Unit,
+) {
+    if (getActivePlayEvent()?.clientEventId == activeEvent.clientEventId) {
+        setActivePlayEvent(null)
+    }
+    setNowPlayingEventIds(getNowPlayingEventIds() - activeEvent.clientEventId)
+    setNowPlayingTrackIdsInFlight(getNowPlayingTrackIdsInFlight() - activeEvent.trackId)
+    if (getNowPlayingTrackId() == activeEvent.trackId) {
+        setNowPlayingTrackId(null)
+    }
+    savePlaybackSnapshot()
+}
+
 internal fun syncPendingPlayEventsAction(
     scope: CoroutineScope,
     canUseServerRequests: () -> Boolean,

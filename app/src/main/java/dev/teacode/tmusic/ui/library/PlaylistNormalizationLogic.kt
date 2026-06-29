@@ -7,10 +7,15 @@ internal fun Playlist.isSyntheticPlaceholderPlaylist(): Boolean {
 }
 
 internal fun Playlist.normalizedClientPlaylist(): Playlist {
-    return if (isFavoritesPlaylist() && title == "Untitled playlist") {
+    val normalizedPlaylist = if (isFavoritesPlaylist() && title == "Untitled playlist") {
         copy(title = "Favorites", isFavorites = true)
     } else {
         this
+    }
+    return if (normalizedPlaylist.isFavoritesPlaylist()) {
+        normalizedPlaylist.normalizedFavoriteMembership()
+    } else {
+        normalizedPlaylist
     }
 }
 

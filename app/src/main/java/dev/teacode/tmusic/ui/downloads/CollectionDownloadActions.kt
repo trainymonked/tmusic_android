@@ -17,6 +17,8 @@ import dev.teacode.tmusic.domain.Track
 import dev.teacode.tmusic.domain.TrackLyrics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 internal data class CollectionDownloadDeletePlan(
@@ -145,6 +147,21 @@ internal fun Map<String, Job>.activeDownloadIds(): Set<String> {
     return filterValues { job -> job.isActive }.keys
 }
 
+private fun Playlist.cachedDownloadSourceOrNull(tracks: List<Track>): PlaylistDownloadSource? {
+    if (trackIds.isEmpty()) {
+        return null
+    }
+    if (trackCount > 0 && trackIds.size < trackCount) {
+        return null
+    }
+    val tracksById = tracks.associateBy { it.id }
+    val playlistTracks = trackIds.map { trackId -> tracksById[trackId] ?: return null }
+    return PlaylistDownloadSource(
+        playlist = this,
+        tracks = playlistTracks,
+    )
+}
+
 internal fun pausePlaylistDownloadAction(
     playlist: Playlist,
     playlistDownloadJobs: Map<String, Job>,
@@ -158,13 +175,25 @@ internal fun pausePlaylistDownloadAction(
 ) {
     playlistDownloadJobs[playlist.id]?.cancel()
     setPlaylistDownloadJobs(playlistDownloadJobs - playlist.id)
-    collectionDownloadPauseRegistry.pausePlaylist(playlist.id)
     val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
-    queuedPlaylistDownloadTrackIds(currentPlaylist, tracks)
-        .forEach { trackId -> updateTrackDownloadState(trackId, DownloadState.NotDownloaded) }
+    if (!currentPlaylist.isOfflineEnabled) {
+        collectionDownloadPauseRegistry.resumePlaylist(playlist.id)
+        refreshStorageStats()
+        return
+    }
+    collectionDownloadPauseRegistry.pausePlaylist(playlist.id)
+    val queuedTrackIds = queuedPlaylistDownloadTrackIds(currentPlaylist, tracks)
+    queuedTrackIds.forEach { trackId -> updateTrackDownloadState(trackId, DownloadState.NotDownloaded) }
+    val tracksForCache = tracks.map { track ->
+        if (track.id in queuedTrackIds) {
+            track.copy(downloadState = DownloadState.NotDownloaded)
+        } else {
+            track
+        }
+    }
     libraryCacheStore.saveLibrary(
         playlists = playlists,
-        tracks = tracks,
+        tracks = tracksForCache,
         savedAlbums = savedAlbums,
     )
     refreshStorageStats()
@@ -236,9 +265,17 @@ internal fun deletePlaylistDownloadAction(
             musicRepository.removeDownloadedTrack(trackId)
             updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
         }
+        val removedTrackIds = deletePlan.queuedTrackIds + deletePlan.downloadedTrackIdsToCache
+        val tracksForCache = tracks.map { track ->
+            if (track.id in removedTrackIds) {
+                track.copy(downloadState = DownloadState.NotDownloaded)
+            } else {
+                track
+            }
+        }
         libraryCacheStore.saveLibrary(
             playlists = nextPlaylists,
-            tracks = tracks,
+            tracks = tracksForCache,
             savedAlbums = savedAlbums,
         )
         refreshStorageStats()
@@ -320,6 +357,7 @@ internal fun downloadPlaylistAction(
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
     setLibraryError: (String?) -> Unit,
+    requestEnableCellularDownloads: () -> Unit,
     refreshStorageStats: () -> Unit,
 ) {
     if (getPlaylistDownloadJobs()[playlist.id]?.isActive == true) {
@@ -328,14 +366,23 @@ internal fun downloadPlaylistAction(
     }
     collectionDownloadPauseRegistry.resumePlaylist(playlist.id)
     if (!canUseNetworkForCollectionDownloads()) {
-        setLibraryError(
-            when {
-                isOfflineOnly() || getSyncMode() == SyncMode.OfflineOnly -> "Offline only mode is enabled."
-                !canUseMediaServerRequests() -> "Connect to the server before downloading playlists."
-                getAccount()?.canPlayMedia == false -> mediaDisabledMessage()
-                else -> "Enable cellular downloads or connect to Wi-Fi before downloading playlists."
-            },
-        )
+        if (
+            !isOfflineOnly() &&
+            getSyncMode() != SyncMode.OfflineOnly &&
+            canUseMediaServerRequests() &&
+            getAccount()?.canPlayMedia != false
+        ) {
+            requestEnableCellularDownloads()
+        } else {
+            setLibraryError(
+                when {
+                    isOfflineOnly() || getSyncMode() == SyncMode.OfflineOnly -> "Offline only mode is enabled."
+                    !canUseMediaServerRequests() -> "Connect to the server before downloading playlists."
+                    getAccount()?.canPlayMedia == false -> mediaDisabledMessage()
+                    else -> "Enable cellular downloads or connect to Wi-Fi before downloading playlists."
+                },
+            )
+        }
         return
     }
 
@@ -352,23 +399,47 @@ internal fun downloadPlaylistAction(
     val job = scope.launch {
         try {
             setLibraryError(null)
-            val source = loadPlaylistDownloadSource(
-                musicRepository = musicRepository,
-                playlist = optimisticPlaylist,
-                pageLimit = DETAIL_TRACK_PAGE_LIMIT,
-                mergePage = { loadedPlaylist, payload, append ->
-                    applyPlaylistTrackPage(loadedPlaylist, payload, append) ?: loadedPlaylist
-                },
-                fallbackTracks = { loadedPlaylist -> loadedPlaylist.tracksFrom(getTracks()) },
-            )
+            val source = optimisticPlaylist.cachedDownloadSourceOrNull(getTracks())
+                ?: loadPlaylistDownloadSource(
+                    musicRepository = musicRepository,
+                    playlist = optimisticPlaylist,
+                    pageLimit = DETAIL_TRACK_PAGE_LIMIT,
+                    mergePage = { loadedPlaylist, payload, append ->
+                        payload.mergePlaylistTrackPage(
+                            playlist = optimisticPlaylist,
+                            currentPlaylist = loadedPlaylist,
+                            append = append,
+                        ).playlists.firstOrNull() ?: loadedPlaylist
+                    },
+                    fallbackTracks = { loadedPlaylist -> loadedPlaylist.tracksFrom(getTracks()) },
+                )
+            currentCoroutineContext().ensureActive()
+            if (getPlaylists().firstOrNull { it.id == playlist.id }?.isOfflineEnabled != true) {
+                return@launch
+            }
             source.loadError?.let(markServerUnavailable)
             if (source.loadError != null && source.tracks.isEmpty()) {
                 setLibraryError(source.loadError.userMessage())
                 return@launch
             }
             val offlinePlaylist = source.playlist.copy(isOfflineEnabled = true)
+            val mergedTracks = musicRepository.withOfflineState(
+                (getTracks() + source.tracks.withKnownTrackMetadata(getTracks()))
+                    .associateBy { it.id }
+                    .values
+                    .toList(),
+            ).withKnownTrackMetadata(getTracks())
+            setTracks(mergedTracks)
             setPlaylists(getPlaylists().updateOrAppendPlaylist(offlinePlaylist))
-            val pendingTracks = source.tracks.filter { track ->
+            libraryCacheStore.saveLibrary(
+                playlists = getPlaylists(),
+                tracks = mergedTracks,
+                savedAlbums = getSavedAlbums(),
+            )
+            val sourceTracksById = mergedTracks.associateBy { it.id }
+            val pendingTracks = offlinePlaylist.trackIds
+                .mapNotNull(sourceTracksById::get)
+                .filter { track ->
                 track.downloadState != DownloadState.Downloaded
             }
             if (pendingTracks.isEmpty()) {
@@ -382,13 +453,19 @@ internal fun downloadPlaylistAction(
 
             val result = downloadTracksSequentially(
                 tracks = pendingTracks,
-                canContinue = canUseNetworkForCollectionDownloads,
+                canContinue = {
+                    canUseNetworkForCollectionDownloads() &&
+                        getPlaylists().firstOrNull { it.id == playlist.id }?.isOfflineEnabled == true
+                },
                 onQueued = { track -> updateTrackDownloadState(track.id, DownloadState.Queued) },
                 downloadTrackAssets = { track ->
                     ensureTrackDownloaded(track)
                     cacheDownloadedAssets(track)
                 },
-                onDownloaded = { track -> updateTrackDownloadState(track.id, DownloadState.Downloaded) },
+                onDownloaded = { track ->
+                    updateTrackDownloadState(track.id, DownloadState.Downloaded)
+                    refreshStorageStats()
+                },
                 onFailed = { track -> updateTrackDownloadState(track.id, DownloadState.NotDownloaded) },
                 isFatalFailure = { error ->
                     if (error.isMediaPlaybackDisabledError()) {
@@ -401,6 +478,10 @@ internal fun downloadPlaylistAction(
                 },
             )
             if (result.interruptedByPolicy) {
+                return@launch
+            }
+            currentCoroutineContext().ensureActive()
+            if (getPlaylists().firstOrNull { it.id == playlist.id }?.isOfflineEnabled != true) {
                 return@launch
             }
 
@@ -462,6 +543,7 @@ internal fun downloadAlbumAction(
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
     setLibraryError: (String?) -> Unit,
+    requestEnableCellularDownloads: () -> Unit,
     refreshStorageStats: () -> Unit,
 ) {
     if (getAlbumDownloadJobs()[album.id]?.isActive == true) {
@@ -470,14 +552,23 @@ internal fun downloadAlbumAction(
     }
     collectionDownloadPauseRegistry.resumeAlbum(album.id)
     if (!canUseNetworkForCollectionDownloads()) {
-        setLibraryError(
-            when {
-                isOfflineOnly() || getSyncMode() == SyncMode.OfflineOnly -> "Offline only mode is enabled."
-                !canUseMediaServerRequests() -> "Connect to the server before downloading albums."
-                getAccount()?.canPlayMedia == false -> mediaDisabledMessage()
-                else -> "Enable cellular downloads or connect to Wi-Fi before downloading albums."
-            },
-        )
+        if (
+            !isOfflineOnly() &&
+            getSyncMode() != SyncMode.OfflineOnly &&
+            canUseMediaServerRequests() &&
+            getAccount()?.canPlayMedia != false
+        ) {
+            requestEnableCellularDownloads()
+        } else {
+            setLibraryError(
+                when {
+                    isOfflineOnly() || getSyncMode() == SyncMode.OfflineOnly -> "Offline only mode is enabled."
+                    !canUseMediaServerRequests() -> "Connect to the server before downloading albums."
+                    getAccount()?.canPlayMedia == false -> mediaDisabledMessage()
+                    else -> "Enable cellular downloads or connect to Wi-Fi before downloading albums."
+                },
+            )
+        }
         return
     }
 
@@ -558,7 +649,10 @@ internal fun downloadAlbumAction(
                     ensureTrackDownloaded(track)
                     cacheDownloadedAssets(track)
                 },
-                onDownloaded = { track -> updateTrackDownloadState(track.id, DownloadState.Downloaded) },
+                onDownloaded = { track ->
+                    updateTrackDownloadState(track.id, DownloadState.Downloaded)
+                    refreshStorageStats()
+                },
                 onFailed = { track -> updateTrackDownloadState(track.id, DownloadState.NotDownloaded) },
                 isFatalFailure = { error ->
                     if (error.isMediaPlaybackDisabledError()) {
@@ -650,16 +744,22 @@ internal fun clearDownloadsAction(
         setPlaylistDownloadJobs(emptyMap())
         collectionDownloadPauseRegistry.clear()
         val currentPlayerState = getPlayerState()
+        val retainedTrackIds = setOfNotNull(currentPlayerState.currentTrack?.id)
         val shouldStopPlayback = currentPlayerState.streamUrl?.startsWith("file:", ignoreCase = true) == true
         val currentPlaylists = getPlaylists()
         val currentTracks = getTracks()
         val downloadedArtworkKeys = downloadedArtworkKeys(currentPlaylists, currentTracks)
         val downloadedArtworkCacheKeys = artworkCacheKeysFor(downloadedArtworkKeys)
         runCatching {
-            musicRepository.clearDownloads()
+            musicRepository.clearDownloads(retainedTrackIds = retainedTrackIds)
             offlineLyricsStore.clear()
             artworkCacheStore.clearKeys(downloadedArtworkCacheKeys)
-        }.onSuccess {
+            if (shouldStopPlayback) {
+                currentPlayerState.currentTrack?.id?.let(musicRepository::cachedPlaybackUrl)
+            } else {
+                null
+            }
+        }.onSuccess { retainedStreamUrl ->
             setArtworkBitmaps(
                 getArtworkBitmaps().filterKeys { artworkSourceKey(it) !in downloadedArtworkKeys },
             )
@@ -696,7 +796,7 @@ internal fun clearDownloadsAction(
             val updatedCurrentTrack = currentPlayerState.currentTrack?.copy(
                 downloadState = DownloadState.NotDownloaded,
             )
-            if (shouldStopPlayback) {
+            if (shouldStopPlayback && retainedStreamUrl == null) {
                 clearGaplessPlaybackState()
                 setPrefetchedPlaybackUrls(emptyMap())
                 setPlaybackUrlPrefetchesInProgress(emptySet())
@@ -709,7 +809,12 @@ internal fun clearDownloadsAction(
                 )
                 playbackStateStore.clear()
             } else {
-                setPlayerState(currentPlayerState.copy(currentTrack = updatedCurrentTrack))
+                setPlayerState(
+                    currentPlayerState.copy(
+                        currentTrack = updatedCurrentTrack,
+                        streamUrl = retainedStreamUrl ?: currentPlayerState.streamUrl,
+                    ),
+                )
             }
             if (!canUseServerRequests()) {
                 setArtists(nextTracks.downloadedArtists())

@@ -24,6 +24,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
 internal const val GAPLESS_PRELOAD_DURATION_US = 20L * C.MICROS_PER_SECOND
+private const val PLAYBACK_MIN_BUFFER_MS = 45_000
+private const val PLAYBACK_MAX_BUFFER_MS = 30 * 60 * 1000
+private const val PLAYBACK_START_BUFFER_MS = 750
+private const val PLAYBACK_RESUME_BUFFER_MS = 1_500
 
 internal data class PreparedCrossfade(
     val player: ExoPlayer,
@@ -44,10 +48,10 @@ internal fun createPlaybackPlayer(
     val playbackContext = context.playbackAttributionContext()
     val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            45_000,
-            120_000,
-            750,
-            1_500,
+            PLAYBACK_MIN_BUFFER_MS,
+            PLAYBACK_MAX_BUFFER_MS,
+            PLAYBACK_START_BUFFER_MS,
+            PLAYBACK_RESUME_BUFFER_MS,
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()

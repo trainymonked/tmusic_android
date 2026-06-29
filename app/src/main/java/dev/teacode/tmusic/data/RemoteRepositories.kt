@@ -2,6 +2,7 @@ package dev.teacode.tmusic.data
 
 import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.AuthRepository
+import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LastFmAuthRequest
 import dev.teacode.tmusic.domain.LastFmConnection
@@ -79,6 +80,9 @@ class RemoteMusicRepository(
     private val apiClient: TMusicApiClient,
     private val offlineTrackStore: OfflineTrackStore,
 ) : MusicRepository {
+    private val nowPlayingLock = Any()
+    private val nowPlayingRequestsInFlight = mutableSetOf<String>()
+
     suspend fun library(): CachedLibrary {
         val playlistPayload = apiClient.playlistsPayload()
 
@@ -109,12 +113,20 @@ class RemoteMusicRepository(
         return apiClient.libraryArtists()
     }
 
-    suspend fun libraryArtistsPage(limit: Int = 50, offset: Int = 0): List<LibraryArtist> {
-        return apiClient.libraryArtistsPage(limit = limit, offset = offset)
+    suspend fun libraryArtistsPage(
+        limit: Int = 50,
+        offset: Int = 0,
+        sortOption: ArtistSortOption,
+    ): List<LibraryArtist> {
+        return apiClient.libraryArtistsPage(limit = limit, offset = offset, sortOption = sortOption)
     }
 
-    suspend fun libraryArtistsPageWithTotal(limit: Int = 50, offset: Int = 0): LibraryArtistsPage {
-        return apiClient.libraryArtistsPageWithTotal(limit = limit, offset = offset)
+    suspend fun libraryArtistsPageWithTotal(
+        limit: Int = 50,
+        offset: Int = 0,
+        sortOption: ArtistSortOption,
+    ): LibraryArtistsPage {
+        return apiClient.libraryArtistsPageWithTotal(limit = limit, offset = offset, sortOption = sortOption)
     }
 
     suspend fun libraryArtist(artistId: String): LibraryArtist? {
@@ -164,6 +176,14 @@ class RemoteMusicRepository(
         offset: Int = 0,
     ): List<LibraryArtist> {
         return apiClient.similarArtists(artistId = artistId, limit = limit, offset = offset)
+            .mapNotNull { artist ->
+                if (artist.name.isNotBlank()) {
+                    artist
+                } else {
+                    apiClient.libraryArtist(artist.id)
+                        ?.copy(similarity = artist.similarity)
+                }
+            }
     }
 
     suspend fun albumTracksPage(
@@ -208,11 +228,8 @@ class RemoteMusicRepository(
         return payload.copy(tracks = withOfflineState(payload.tracks))
     }
 
-    suspend fun favoritesPlaylistPayload(playlist: Playlist? = null): PlaylistPayload {
-        val payload = apiClient.favoritesPlaylistPayload(
-            fallbackPlaylistId = playlist?.id,
-            fallbackIsOfflineEnabled = playlist?.isOfflineEnabled == true,
-        )
+    suspend fun favoritesPlaylistPayload(): PlaylistPayload {
+        val payload = apiClient.favoritesPlaylistPayload()
         return payload.copy(tracks = withOfflineState(payload.tracks))
     }
 
@@ -230,13 +247,10 @@ class RemoteMusicRepository(
     }
 
     suspend fun favoritesPlaylistPayloadTrackPage(
-        playlist: Playlist? = null,
         trackLimit: Int = 100,
         trackOffset: Int = 0,
     ): PlaylistPayload {
         val payload = apiClient.favoritesPlaylistPayloadPage(
-            fallbackPlaylistId = playlist?.id,
-            fallbackIsOfflineEnabled = playlist?.isOfflineEnabled == true,
             trackLimit = trackLimit,
             trackOffset = trackOffset,
         )
@@ -274,6 +288,13 @@ class RemoteMusicRepository(
         offlineTrackStore.clear()
     }
 
+    suspend fun clearDownloads(retainedTrackIds: Set<String>) {
+        retainedTrackIds.forEach { trackId ->
+            offlineTrackStore.moveToCache(trackId, MUSIC_CACHE_LIMIT_BYTES)
+        }
+        offlineTrackStore.clear()
+    }
+
     suspend fun downloadsSizeBytes(): Long {
         return offlineTrackStore.sizeBytes()
     }
@@ -292,6 +313,10 @@ class RemoteMusicRepository(
 
     override suspend fun musicCacheSizeBytes(): Long {
         return offlineTrackStore.cacheSizeBytes()
+    }
+
+    suspend fun musicCacheSizeBytesExcluding(retainedTrackIds: Set<String>): Long {
+        return offlineTrackStore.cacheSizeBytesExcluding(retainedTrackIds)
     }
 
     override suspend fun clearMusicCache() {
@@ -409,7 +434,18 @@ class RemoteMusicRepository(
     }
 
     override suspend fun sendNowPlaying(trackId: String) {
-        apiClient.sendNowPlaying(trackId)
+        synchronized(nowPlayingLock) {
+            if (!nowPlayingRequestsInFlight.add(trackId)) {
+                return
+            }
+        }
+        try {
+            apiClient.sendNowPlaying(trackId)
+        } finally {
+            synchronized(nowPlayingLock) {
+                nowPlayingRequestsInFlight.remove(trackId)
+            }
+        }
     }
 
     fun withOfflineState(tracks: List<Track>): List<Track> {

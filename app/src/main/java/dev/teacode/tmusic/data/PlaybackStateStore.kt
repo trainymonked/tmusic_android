@@ -305,7 +305,12 @@ private fun List<LibraryArtist>.toArtistJsonArray(): JSONArray {
         array.put(
             JSONObject()
                 .put("id", artist.id)
-                .put("name", artist.name),
+                .put("name", artist.name)
+                .apply {
+                    artist.latestReleaseYear?.let { latestReleaseYear ->
+                        put("latestReleaseYear", latestReleaseYear)
+                    }
+                },
         )
     }
     return array
@@ -319,9 +324,15 @@ private fun JSONArray?.artistValues(): List<LibraryArtist> {
     for (index in 0 until length()) {
         val item = optJSONObject(index) ?: continue
         val id = item.optString("id").takeIf { it.isNotBlank() } ?: continue
+        val name = item.optString("name").takeIf { it.isNotBlank() } ?: continue
         values += LibraryArtist(
             id = id,
-            name = item.optString("name").takeIf { it.isNotBlank() } ?: id,
+            name = name,
+            latestReleaseYear = if (item.has("latestReleaseYear") && !item.isNull("latestReleaseYear")) {
+                item.optInt("latestReleaseYear")
+            } else {
+                null
+            },
         )
     }
     return values.distinctBy { it.id }

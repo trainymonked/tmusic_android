@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
@@ -40,6 +41,7 @@ internal fun PlaylistHeader(
     downloadState: DownloadState,
     downloadProgressPercent: Int?,
     isFavorites: Boolean,
+    isDownloadActive: Boolean,
     canEdit: Boolean,
     canDownload: Boolean,
     hasPlayableTracks: Boolean,
@@ -106,6 +108,7 @@ internal fun PlaylistHeader(
     }
     Spacer(modifier = Modifier.height(12.dp))
     Row(
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -126,9 +129,13 @@ internal fun PlaylistHeader(
                 Text("Shuffle")
             }
         } else {
-            IconButton(
+            Button(
                 onClick = if (isActivePlaylist) onTogglePlayback else onPlayPlaylist,
                 enabled = hasPlayableTracks,
+                modifier = Modifier
+                    .height(44.dp)
+                    .width(132.dp),
+                shape = RoundedCornerShape(8.dp),
             ) {
                 Icon(
                     imageVector = if (isActivePlaylist && isPlaybackPlaying) {
@@ -142,12 +149,16 @@ internal fun PlaylistHeader(
                         "Play playlist"
                     },
                 )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(if (isActivePlaylist && isPlaybackPlaying) "Pause" else "Play")
             }
         }
+        Spacer(modifier = Modifier.weight(1f))
         CollectionDownloadControls(
             downloadState = downloadState,
             progressPercent = downloadProgressPercent,
             isPaused = isPlaylistDownloadPaused(playlist.id),
+            isActive = isDownloadActive,
             enabled = canDownload,
             downloadContentDescription = "Download playlist",
             deleteContentDescription = "Delete playlist download",

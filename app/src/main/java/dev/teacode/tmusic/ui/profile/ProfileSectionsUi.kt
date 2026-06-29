@@ -118,6 +118,7 @@ internal fun ProfileDownloadsSection(
 @Composable
 internal fun ProfileConnectionSection(
     useLocalBackend: Boolean,
+    showLocalBackendOption: Boolean,
     canUseNetwork: Boolean,
     syncMode: SyncMode,
     offlineOnly: Boolean,
@@ -132,13 +133,15 @@ internal fun ProfileConnectionSection(
             onCheckedChange = onOfflineOnlyChange,
         )
         ProfileSettingDivider()
-        ProfileSwitchRow(
-            title = "Local server",
-            subtitle = "Use the local development backend",
-            checked = useLocalBackend,
-            onCheckedChange = onUseLocalBackendChange,
-        )
-        ProfileSettingDivider()
+        if (showLocalBackendOption) {
+            ProfileSwitchRow(
+                title = "Local server",
+                subtitle = "Use the local development backend",
+                checked = useLocalBackend,
+                onCheckedChange = onUseLocalBackendChange,
+            )
+            ProfileSettingDivider()
+        }
         ProfileStatusRow(
             title = "Status",
             value = syncMode.profileLabel(canUseNetwork),

@@ -112,8 +112,10 @@ internal fun PlaybackEffects(
         }
         val streamUrl = playerState.streamUrl
         if (streamUrl == null) {
-            exoPlayer.stop()
-            exoPlayer.clearMediaItems()
+            if (playerState.currentTrack == null || !playerState.isPlaying) {
+                exoPlayer.stop()
+                exoPlayer.clearMediaItems()
+            }
             exoPlayer.repeatMode = desiredExoRepeatMode(repeatMode, hasGaplessQueue = false)
         } else {
             val currentMediaItem = exoPlayer.currentMediaItem

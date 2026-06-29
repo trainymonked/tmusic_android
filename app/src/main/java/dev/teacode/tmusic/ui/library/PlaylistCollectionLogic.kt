@@ -71,8 +71,8 @@ internal fun Playlist.mergeKnownPlaylistState(existing: Playlist?): Playlist {
         playlistTrackIdsByTrackId = existing.playlistTrackIdsByTrackId + playlistTrackIdsByTrackId,
         isOfflineEnabled = isOfflineEnabled || existing.isOfflineEnabled,
         isFavorites = isFavorites || existing.isFavorites,
-        trackCount = maxOf(trackCount, existing.trackCount, mergedTrackIds.size),
-        totalDurationSeconds = totalDurationSeconds ?: existing.totalDurationSeconds,
+        trackCount = trackCount.coerceAtLeast(mergedTrackIds.size),
+        totalDurationSeconds = totalDurationSeconds,
     )
 }
 

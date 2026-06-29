@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.domain.DownloadState
+import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.Track
@@ -100,6 +101,17 @@ internal fun List<LibraryArtist>.sortedArtistsForDisplay(): List<LibraryArtist> 
     )
 }
 
+internal fun List<LibraryArtist>.sortedArtistsForDisplay(sortOption: ArtistSortOption): List<LibraryArtist> {
+    return when (sortOption) {
+        ArtistSortOption.Name -> sortedWith(
+            compareBy<LibraryArtist> { it.name.lowercase() }
+                .thenBy { it.id },
+        )
+        ArtistSortOption.TrackCount -> sortedArtistsForDisplay()
+        ArtistSortOption.LatestReleases -> this
+    }
+}
+
 internal fun List<LibraryArtist>.manualSimilarArtistsFirst(): List<LibraryArtist> {
     return withIndex()
         .sortedWith(
@@ -108,8 +120,4 @@ internal fun List<LibraryArtist>.manualSimilarArtistsFirst(): List<LibraryArtist
             }.thenBy { it.index },
         )
         .map(IndexedValue<LibraryArtist>::value)
-}
-
-internal fun List<LibraryArtist>.filterOwnReleaseArtists(): List<LibraryArtist> {
-    return filter { artist -> !artist.representativeAlbumId.isNullOrBlank() }
 }

@@ -49,6 +49,7 @@ fun SignInScreen(
     isLoading: Boolean,
     errorMessage: String?,
     useLocalBackend: Boolean,
+    showLocalBackendOption: Boolean,
     onUseLocalBackendChange: (Boolean) -> Unit,
     onGoogleSignIn: () -> Unit,
     canContinueOffline: Boolean,
@@ -149,27 +150,29 @@ fun SignInScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                    if (showLocalBackendOption) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(8.dp),
                         ) {
-                            Text(
-                                text = "Local server",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Switch(
-                                checked = useLocalBackend,
-                                onCheckedChange = onUseLocalBackendChange,
-                                enabled = !isLoading,
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Local server",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Switch(
+                                    checked = useLocalBackend,
+                                    onCheckedChange = onUseLocalBackendChange,
+                                    enabled = !isLoading,
+                                )
+                            }
                         }
                     }
                     Button(

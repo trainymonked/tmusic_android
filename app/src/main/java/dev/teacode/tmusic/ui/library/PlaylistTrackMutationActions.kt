@@ -155,24 +155,11 @@ internal fun removeTrackFromPlaylistAction(
         return getPlaylists().firstOrNull { it.id == playlist.id } ?: playlist
     }
 
-    fun Playlist.currentPlaylistTrackIdFor(trackId: String, requestedPlaylistTrackId: String): String {
-        if (requestedPlaylistTrackId in playlistTrackIds) {
-            return requestedPlaylistTrackId
-        }
-        val index = trackIds.indexOf(trackId)
-        return playlistTrackIds.getOrNull(index)
-            ?: playlistTrackIdsByTrackId[trackId]
-            ?: requestedPlaylistTrackId
-    }
-
     if (!canUseServerRequests()) {
         val currentPlaylist = currentPlaylist()
-        val effectivePlaylistTrackId = currentPlaylist.currentPlaylistTrackIdFor(trackId, playlistTrackId)
+        val effectivePlaylistTrackId = playlistTrackId
         val removedIndex = currentPlaylist.playlistTrackIds.indexOf(effectivePlaylistTrackId)
         val removedTrackId = currentPlaylist.trackIds.getOrNull(removedIndex)
-            ?: currentPlaylist.playlistTrackIdsByTrackId.entries
-                .firstOrNull { it.value == effectivePlaylistTrackId }
-                ?.key
         val updatedPlaylist = currentPlaylist.withoutPlaylistTrackId(effectivePlaylistTrackId, trackId)
         setPlaylists(getPlaylists().updatePlaylist(updatedPlaylist))
         enqueueLibraryMutation(
@@ -190,12 +177,9 @@ internal fun removeTrackFromPlaylistAction(
         setLibraryError(null)
         val previousPlaylists = getPlaylists()
         val latestPlaylist = currentPlaylist()
-        val effectivePlaylistTrackId = latestPlaylist.currentPlaylistTrackIdFor(trackId, playlistTrackId)
+        val effectivePlaylistTrackId = playlistTrackId
         val removedIndex = latestPlaylist.playlistTrackIds.indexOf(effectivePlaylistTrackId)
         val removedTrackId = latestPlaylist.trackIds.getOrNull(removedIndex)
-            ?: latestPlaylist.playlistTrackIdsByTrackId.entries
-                .firstOrNull { it.value == effectivePlaylistTrackId }
-                ?.key
         setPlaylists(
             getPlaylists().updatePlaylist(
                 latestPlaylist.withoutPlaylistTrackId(effectivePlaylistTrackId, trackId),
@@ -206,11 +190,17 @@ internal fun removeTrackFromPlaylistAction(
                 playlistId = playlist.id,
                 playlistTrackId = effectivePlaylistTrackId,
             )
-        }.onSuccess {
+        }.onSuccess { serverPlaylist ->
             setAccessToken(refreshAccessToken())
-            val nextPlaylists = getPlaylists().updatePlaylist(
-                currentPlaylist().withoutPlaylistTrackId(effectivePlaylistTrackId, trackId),
-            )
+            val locallyRemovedPlaylist = currentPlaylist().withoutPlaylistTrackId(effectivePlaylistTrackId, trackId)
+            val updatedPlaylist = serverPlaylist?.copy(
+                trackIds = locallyRemovedPlaylist.trackIds,
+                playlistTrackIds = locallyRemovedPlaylist.playlistTrackIds,
+                playlistTrackIdsByTrackId = locallyRemovedPlaylist.playlistTrackIdsByTrackId,
+                isOfflineEnabled = serverPlaylist.isOfflineEnabled || locallyRemovedPlaylist.isOfflineEnabled,
+                isFavorites = serverPlaylist.isFavorites || locallyRemovedPlaylist.isFavorites,
+            ) ?: locallyRemovedPlaylist
+            val nextPlaylists = getPlaylists().updatePlaylist(updatedPlaylist)
             setPlaylists(nextPlaylists)
             removedTrackId?.let { trackId ->
                 val removedTrack = getTracks().firstOrNull { it.id == trackId }

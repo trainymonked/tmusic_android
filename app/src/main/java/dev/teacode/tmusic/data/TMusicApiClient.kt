@@ -1,9 +1,10 @@
-package dev.teacode.tmusic.data
+﻿package dev.teacode.tmusic.data
 
 import android.util.Log
 import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.ArtistSimilarity
+import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LastFmAuthRequest
 import dev.teacode.tmusic.domain.LastFmConnection
@@ -197,7 +198,7 @@ class TMusicApiClient(
         while (true) {
             val body = request(
                 method = "GET",
-                path = "/playlists/${playlistId.pathSegment()}?trackLimit=$PLAYLIST_DETAIL_TRACK_PAGE_LIMIT" +
+                path = "/playlists/${playlistId.pathSegment()}?trackLimit=$PLAYLIST_FULL_TRACK_PAGE_LIMIT" +
                     "&trackOffset=$trackOffset",
                 authenticated = true,
             )
@@ -207,15 +208,17 @@ class TMusicApiClient(
             val totalTrackCount = pages.asSequence()
                 .mapNotNull { payload -> payload.playlists.firstOrNull()?.trackCount?.takeIf { it > 0 } }
                 .firstOrNull()
-            if (totalTrackCount != null && loadedTrackCount >= totalTrackCount) {
-                break
-            }
             val playlistTrackCount = page.playlists.firstOrNull()?.trackIds.orEmpty().size
             val pageSize = maxOf(page.tracks.size, playlistTrackCount)
-            if (pageSize < PLAYLIST_DETAIL_TRACK_PAGE_LIMIT) {
+            val canTrustTotalCount = totalTrackCount != null &&
+                (totalTrackCount > PLAYLIST_FULL_TRACK_PAGE_LIMIT || pageSize < PLAYLIST_FULL_TRACK_PAGE_LIMIT)
+            if (totalTrackCount != null && canTrustTotalCount && loadedTrackCount >= totalTrackCount) {
                 break
             }
-            trackOffset += PLAYLIST_DETAIL_TRACK_PAGE_LIMIT
+            if (pageSize == 0 || (pageSize < PLAYLIST_FULL_TRACK_PAGE_LIMIT && totalTrackCount == null)) {
+                break
+            }
+            trackOffset += PLAYLIST_FULL_TRACK_PAGE_LIMIT
         }
 
         return pages.mergeSinglePlaylistPayload()
@@ -226,7 +229,7 @@ class TMusicApiClient(
         trackLimit: Int = PLAYLIST_DETAIL_TRACK_PAGE_LIMIT,
         trackOffset: Int = 0,
     ): PlaylistPayload {
-        val safeTrackLimit = trackLimit.coerceIn(1, PLAYLIST_DETAIL_TRACK_PAGE_LIMIT)
+        val safeTrackLimit = trackLimit.coerceIn(1, PLAYLIST_FULL_TRACK_PAGE_LIMIT)
         val body = request(
             method = "GET",
             path = "/playlists/${playlistId.pathSegment()}?trackLimit=$safeTrackLimit" +
@@ -236,17 +239,12 @@ class TMusicApiClient(
         return body.toPlaylistPayload()
     }
 
-    suspend fun favoritesPlaylistPayload(
-        fallbackPlaylistId: String? = null,
-        fallbackIsOfflineEnabled: Boolean = false,
-    ): PlaylistPayload {
+    suspend fun favoritesPlaylistPayload(): PlaylistPayload {
         val pages = mutableListOf<PlaylistPayload>()
         var offset = 0
         while (true) {
             val page = favoritesPlaylistPayloadPage(
-                fallbackPlaylistId = fallbackPlaylistId,
-                fallbackIsOfflineEnabled = fallbackIsOfflineEnabled,
-                trackLimit = PLAYLIST_DETAIL_TRACK_PAGE_LIMIT,
+                trackLimit = FAVORITES_FULL_TRACK_PAGE_LIMIT,
                 trackOffset = offset,
             )
             pages += page
@@ -254,35 +252,32 @@ class TMusicApiClient(
             val totalTrackCount = pages.asSequence()
                 .mapNotNull { payload -> payload.playlists.firstOrNull()?.trackCount?.takeIf { it > 0 } }
                 .firstOrNull()
-            if (totalTrackCount != null && loadedTrackCount >= totalTrackCount) {
-                break
-            }
             val pageSize = maxOf(page.tracks.size, page.playlists.firstOrNull()?.trackIds.orEmpty().size)
-            if (pageSize < PLAYLIST_DETAIL_TRACK_PAGE_LIMIT) {
+            val canTrustTotalCount = totalTrackCount != null &&
+                (totalTrackCount > FAVORITES_FULL_TRACK_PAGE_LIMIT || pageSize < FAVORITES_FULL_TRACK_PAGE_LIMIT)
+            if (totalTrackCount != null && canTrustTotalCount && loadedTrackCount >= totalTrackCount) {
                 break
             }
-            offset += PLAYLIST_DETAIL_TRACK_PAGE_LIMIT
+            if (pageSize == 0 || (pageSize < FAVORITES_FULL_TRACK_PAGE_LIMIT && totalTrackCount == null)) {
+                break
+            }
+            offset += FAVORITES_FULL_TRACK_PAGE_LIMIT
         }
 
         return pages.mergeSinglePlaylistPayload()
     }
 
     suspend fun favoritesPlaylistPayloadPage(
-        fallbackPlaylistId: String? = null,
-        fallbackIsOfflineEnabled: Boolean = false,
         trackLimit: Int = PLAYLIST_DETAIL_TRACK_PAGE_LIMIT,
         trackOffset: Int = 0,
     ): PlaylistPayload {
-        val safeTrackLimit = trackLimit.coerceIn(1, PLAYLIST_DETAIL_TRACK_PAGE_LIMIT)
+        val safeTrackLimit = trackLimit.coerceIn(1, FAVORITES_FULL_TRACK_PAGE_LIMIT)
         val body = request(
             method = "GET",
             path = "/playlists/favorites?limit=$safeTrackLimit&offset=${trackOffset.coerceAtLeast(0)}",
             authenticated = true,
         )
-        return body.toFavoritesPlaylistPayload(
-            fallbackPlaylistId = fallbackPlaylistId,
-            fallbackIsOfflineEnabled = fallbackIsOfflineEnabled,
-        )
+        return body.toFavoritesPlaylistPayload()
     }
 
     suspend fun libraryArtists(): List<LibraryArtist> {
@@ -296,20 +291,29 @@ class TMusicApiClient(
     suspend fun libraryArtistsPage(
         limit: Int = LIBRARY_PAGE_LIMIT,
         offset: Int = 0,
+        sortOption: ArtistSortOption,
     ): List<LibraryArtist> {
-        return libraryArtistsPageWithTotal(limit = limit, offset = offset).artists
+        return libraryArtistsPageWithTotal(
+            limit = limit,
+            offset = offset,
+            sortOption = sortOption,
+        ).artists
     }
 
     suspend fun libraryArtistsPageWithTotal(
         limit: Int = LIBRARY_PAGE_LIMIT,
         offset: Int = 0,
+        sortOption: ArtistSortOption,
     ): LibraryArtistsPage {
         val body = request(
             method = "GET",
-            path = "/library/artists".withPagination(
-                limit = limit.coerceIn(1, LIBRARY_PAGE_LIMIT),
-                offset = offset.coerceAtLeast(0),
-            ),
+            path = (
+                "/library/artists?sortBy=${sortOption.apiSortBy}" +
+                    "&sortDirection=${sortOption.apiSortDirection}"
+                ).withPagination(
+                    limit = limit.coerceIn(1, LIBRARY_PAGE_LIMIT),
+                    offset = offset.coerceAtLeast(0),
+                ),
             authenticated = true,
         )
         return body.toLibraryArtistsPage()
@@ -569,15 +573,10 @@ class TMusicApiClient(
             authenticated = true,
         ).trim()
 
-        if (body.startsWith("{")) {
-            val root = JSONObject(body).payloadObject()
-            return root.optionalMediaUrl()
-                ?.toAbsoluteUrl(baseUrl)
-                ?: throw TMusicApiException(null, "The stream URL response does not contain a playback URL.")
-        }
-
-        return body.trim('"')
-            .toAbsoluteUrl(baseUrl)
+        val root = JSONObject(body).payloadObject()
+        return root.expectedStringOrLog("url", "Stream URL response")
+            ?.toAbsoluteUrl(baseUrl)
+            ?: throw TMusicApiException(null, "The stream URL response does not contain url.")
     }
 
     suspend fun lyrics(trackId: String): TrackLyrics? {
@@ -653,7 +652,7 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(responseBody).payloadObject()
-        return root.playlistUpdateOrNull()
+        return root.playlistMutationUpdateOrNull(playlistId)
     }
 
     suspend fun deletePlaylist(playlistId: String) {
@@ -680,7 +679,7 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(responseBody).payloadObject()
-        return root.playlistUpdateOrNull()
+        return root.playlistMutationUpdateOrNull(playlistId)
     }
 
     suspend fun removeTrackFromPlaylist(playlistId: String, playlistTrackId: String): Playlist? {
@@ -696,8 +695,10 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(responseBody).payloadObject()
-        val playlist = root.optJSONObject("playlist") ?: root
-        return playlist.toPlaylist()
+        if (root.optBoolean("ok", false) && root.optJSONObject("playlist") == null) {
+            return null
+        }
+        return root.playlistUpdateOrNull()
     }
 
     suspend fun reorderPlaylistTracks(playlistId: String, playlistTrackIds: List<String>): Playlist? {
@@ -750,10 +751,10 @@ class TMusicApiClient(
 
         return TrackDownloadInfo(
             trackId = trackId,
-            url = root.optionalMediaUrl()?.toAbsoluteUrl(baseUrl)
-                ?: throw TMusicApiException(null, "The download URL response does not contain downloadUrl or url."),
-            etag = root.optionalString("etag", "eTag", "ETag"),
-            checksumSha256 = root.optionalString("checksumSha256", "sha256", "checksum"),
+            url = root.expectedStringOrLog("url", "Track download URL response")?.toAbsoluteUrl(baseUrl)
+                ?: throw TMusicApiException(null, "The download URL response does not contain url."),
+            etag = root.optionalString("etag"),
+            checksumSha256 = root.optionalString("checksumSha256"),
         )
     }
 
@@ -770,11 +771,9 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(body).payloadObject()
-        return (
-            root.artworkUrl()?.toAbsoluteUrl(baseUrl)
-                ?: root.optionalString("artworkUrl", "url", "href")?.toAbsoluteUrl(baseUrl)
-            )
-            ?: throw TMusicApiException(null, "The artwork response does not contain artworkUrl or url.")
+        return root.expectedStringOrLog("artworkUrl", "Track artwork response")
+            ?.toAbsoluteUrl(baseUrl)
+            ?: throw TMusicApiException(null, "The artwork response does not contain artworkUrl.")
     }
 
     suspend fun albumArtworkUrl(albumId: String): String {
@@ -790,11 +789,9 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(body).payloadObject()
-        return (
-            root.artworkUrl()?.toAbsoluteUrl(baseUrl)
-                ?: root.optionalString("artworkUrl", "url", "href")?.toAbsoluteUrl(baseUrl)
-            )
-            ?: throw TMusicApiException(null, "The album artwork response does not contain artworkUrl or url.")
+        return root.expectedStringOrLog("artworkUrl", "Album artwork response")
+            ?.toAbsoluteUrl(baseUrl)
+            ?: throw TMusicApiException(null, "The album artwork response does not contain artworkUrl.")
     }
 
     suspend fun artistArtworkUrl(artistId: String, size: Int): String {
@@ -811,11 +808,9 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(body).payloadObject()
-        return (
-            root.artworkUrl()?.toAbsoluteUrl(baseUrl)
-                ?: root.optionalString("artworkUrl", "url", "href")?.toAbsoluteUrl(baseUrl)
-            )
-            ?: throw TMusicApiException(null, "The artist artwork response does not contain artworkUrl or url.")
+        return root.expectedStringOrLog("artworkUrl", "Artist artwork response")
+            ?.toAbsoluteUrl(baseUrl)
+            ?: throw TMusicApiException(null, "The artist artwork response does not contain artworkUrl.")
     }
 
     suspend fun playlistArtworkUrl(playlistId: String, size: Int): String {
@@ -832,11 +827,9 @@ class TMusicApiClient(
         }
 
         val root = JSONObject(body).payloadObject()
-        return (
-            root.artworkUrl()?.toAbsoluteUrl(baseUrl)
-                ?: root.optionalString("artworkUrl", "url", "href")?.toAbsoluteUrl(baseUrl)
-            )
-            ?: throw TMusicApiException(null, "The playlist artwork response does not contain artworkUrl or url.")
+        return root.expectedStringOrLog("artworkUrl", "Playlist artwork response")
+            ?.toAbsoluteUrl(baseUrl)
+            ?: throw TMusicApiException(null, "The playlist artwork response does not contain artworkUrl.")
     }
 
 
@@ -855,10 +848,10 @@ class TMusicApiClient(
             )
         }
         val root = JSONObject(body).payloadObject()
-        val url = root.optionalString("authUrl", "url", "href")?.toAbsoluteUrl(baseUrl)
+        val url = root.optionalString("authUrl")?.toAbsoluteUrl(baseUrl)
             ?: throw TMusicApiException(null, "The Last.fm auth response does not contain authUrl or url.")
         return LastFmAuthRequest(
-            token = root.optionalString("token", "lastFmToken")
+            token = root.optionalString("token")
                 ?: url.queryParameter("token")
                 ?: throw TMusicApiException(null, "The Last.fm auth response does not contain token."),
             url = url,
@@ -912,6 +905,7 @@ class TMusicApiClient(
             path = "/lastfm/play-events/sync",
             body = body,
             authenticated = true,
+            readTimeoutMs = LASTFM_SYNC_READ_TIMEOUT_MS,
         )
         return responseBody.syncedClientEventIds(defaultIds = events.map { it.clientEventId }.toSet())
     }
@@ -1191,11 +1185,14 @@ class TMusicApiClient(
     private companion object {
         const val CONNECT_TIMEOUT_MS = 5_000
         const val READ_TIMEOUT_MS = 8_000
+        const val LASTFM_SYNC_READ_TIMEOUT_MS = 60_000
         const val LYRICS_REFRESH_READ_TIMEOUT_MS = 120_000
         const val LIBRARY_PAGE_LIMIT = 50
         const val PLAYLIST_PAGE_LIMIT = 50
         const val PLAYLIST_TRACK_PAGE_LIMIT = 50
         const val PLAYLIST_DETAIL_TRACK_PAGE_LIMIT = 100
+        const val PLAYLIST_FULL_TRACK_PAGE_LIMIT = 200
+        const val FAVORITES_FULL_TRACK_PAGE_LIMIT = 500
         const val TRACK_LIST_PAGE_LIMIT = 100
         const val TRACK_CATALOG_PAGE_LIMIT = 500
         const val TRACK_SEARCH_PAGE_LIMIT = 100
@@ -1231,7 +1228,7 @@ private data class ApiResponse(
 
         return runCatching {
             val root = JSONObject(body)
-            root.optionalString("message", "error") ?: "Request failed with HTTP $statusCode."
+            root.optionalString("message") ?: "Request failed with HTTP $statusCode."
         }.getOrElse {
             body
         }
@@ -1243,7 +1240,7 @@ private data class ApiResponse(
         }
 
         return runCatching {
-            JSONObject(body).optionalString("code", "errorCode")
+            JSONObject(body).optionalString("code")
         }.getOrNull()
     }
 
@@ -1311,206 +1308,82 @@ private fun JSONObject.expectedBooleanOrLog(name: String, context: String): Bool
 }
 
 private fun JSONObject.optionalString(vararg names: String): String? {
-    for (name in names) {
-        if (has(name)) {
-            val rawValue = opt(name)
-            if (rawValue is JSONObject || rawValue is JSONArray || rawValue == JSONObject.NULL) {
-                continue
-            }
-            val value = rawValue?.toString().orEmpty()
-            if (value.isMeaningfulString()) {
-                return value
-            }
+    val name = names.firstOrNull() ?: return null
+    if (has(name)) {
+        val rawValue = opt(name)
+        if (rawValue is JSONObject || rawValue is JSONArray || rawValue == JSONObject.NULL) {
+            return null
+        }
+        val value = rawValue?.toString().orEmpty()
+        if (value.isMeaningfulString()) {
+            return value
         }
     }
-    return null
-}
-
-private fun JSONObject.optionalMediaUrl(): String? {
-    for (name in listOf(
-        "streamUrl",
-        "playbackUrl",
-        "signedUrl",
-        "downloadUrl",
-        "fileUrl",
-        "mediaUrl",
-        "audioUrl",
-        "url",
-        "href",
-        "src",
-    )) {
-        when (val value = opt(name)) {
-            is String -> if (value.isNotBlank()) return value
-            is JSONObject -> value.optionalMediaUrl()?.let { return it }
-        }
-    }
-
-    for (name in listOf("stream", "playback", "download", "file", "media", "audio", "track", "data")) {
-        when (val value = opt(name)) {
-            is String -> if (value.isNotBlank()) return value
-            is JSONObject -> value.optionalMediaUrl()?.let { return it }
-        }
-    }
-
     return null
 }
 
 private fun JSONObject.optionalInt(vararg names: String): Int? {
-    for (name in names) {
-        if (has(name) && !isNull(name)) {
-            return optInt(name)
-        }
+    val name = names.firstOrNull() ?: return null
+    if (has(name) && !isNull(name)) {
+        return optInt(name)
     }
     return null
 }
 
 private fun JSONObject.optionalBoolean(vararg names: String): Boolean? {
-    for (name in names) {
-        if (has(name) && !isNull(name)) {
-            return optBoolean(name)
-        }
+    val name = names.firstOrNull() ?: return null
+    if (has(name) && !isNull(name)) {
+        return optBoolean(name)
     }
     return null
 }
 
 private fun JSONObject.appUpdateInfoOrNull(statusCode: Int? = null): AppUpdateInfo? {
-    val update = optJSONObject("update")
-        ?: optJSONObject("appUpdate")
-        ?: optJSONObject("app_update")
-        ?: this
-    val code = optionalString("code", "errorCode")
-    val latestVersionCode = update.optionalInt("latestVersionCode", "latestCode")
-    val minSupportedVersionCode = update.optionalInt(
-        "forcedMinVersionCode",
-        "minSupportedVersionCode",
-        "minimumSupportedVersionCode",
-        "minCode",
-    )
-    val forceUpdate = update.optionalBoolean("forceUpdate", "required") == true ||
-        statusCode == HTTP_UPGRADE_REQUIRED ||
-        code.equals("APP_UPDATE_REQUIRED", ignoreCase = true)
-    val version = update.optionalString("version", "versionName", "latestVersionName")
-        ?: latestVersionCode?.toString()
-        ?: minSupportedVersionCode?.takeIf { forceUpdate }?.let { "min-$it" }
-        ?: BuildConfig.VERSION_NAME.takeIf { forceUpdate }
-        ?: return null
-    val available = update.optionalBoolean("available") ?: (
-        forceUpdate ||
-            minSupportedVersionCode?.let { BuildConfig.VERSION_CODE < it } == true ||
-            if (latestVersionCode != null) {
-                latestVersionCode > BuildConfig.VERSION_CODE
-            } else {
-                isAppVersionNewer(version, BuildConfig.VERSION_NAME)
-            }
-        )
-    if (!available && !forceUpdate) {
+    val code = optionalString("code")
+    val minSupportedVersionCode = optionalInt("minSupportedVersionCode")
+    val forceUpdate = statusCode == HTTP_UPGRADE_REQUIRED ||
+        code.equals("APP_UPDATE_REQUIRED", ignoreCase = true) ||
+        minSupportedVersionCode?.let { BuildConfig.VERSION_CODE < it } == true
+    if (!forceUpdate) {
         return null
     }
-
-    val updateUrl = update.optionalString("updateUrl", "downloadUrl", "url", "pageUrl").orEmpty()
-    val message = update.optionalString("message", "changelog", "releaseNotes").orEmpty()
     return AppUpdateInfo(
-        version = version,
-        title = update.optionalString("title")
-            ?: if (forceUpdate) "Update required" else "Update available",
-        changelog = message,
-        pageUrl = update.optionalString("pageUrl", "htmlUrl").orEmpty().ifBlank { updateUrl },
-        downloadUrl = updateUrl,
-        releaseNotesUrl = update.optionalString("releaseNotesUrl", "changelogUrl", "notesUrl").orEmpty(),
+        version = minSupportedVersionCode?.let { "min-$it" } ?: BuildConfig.VERSION_NAME,
+        title = "Update required",
+        changelog = "",
+        pageUrl = "",
+        downloadUrl = "",
+        releaseNotesUrl = "",
         minSupportedVersionCode = minSupportedVersionCode,
-        latestVersionCode = latestVersionCode,
-        forceUpdate = forceUpdate,
-        blockingScopes = update.optJSONArray("blockingScopes")
+        latestVersionCode = null,
+        forceUpdate = true,
+        blockingScopes = optJSONArray("blockingScopes")
             ?.stringValues()
             .orEmpty(),
     )
 }
 
 private fun JSONObject.paginationTotalCount(): Int? {
-    return optionalInt("total")
-}
-
-private fun JSONObject.artworkUrl(): String? {
-    for (name in listOf("artworkUrl", "coverUrl", "imageUrl", "url")) {
-        if (!has(name) || isNull(name)) {
-            continue
-        }
-        when (val value = opt(name)) {
-            is String -> if (value.isNotBlank()) return value
-            is JSONObject -> value.artworkObjectUrl()
-                ?.let { return it }
-            is JSONArray -> value.firstArtworkUrl()?.let { return it }
-        }
+    optionalInt("total")?.let { return it }
+    for (name in listOf("pagination", "meta", "page")) {
+        optJSONObject(name)
+            ?.optionalInt("total")
+            ?.let { return it }
     }
     return null
 }
 
 private fun JSONObject.hasArtworkMetadata(): Boolean {
-    if (has("artwork") && !isNull("artwork")) {
-        return true
-    }
-
-    return optionalString(
-        "artworkId",
-        "coverId",
-        "imageId",
-        "artworkUrl",
-        "coverUrl",
-        "imageUrl",
-    ) != null
-}
-
-private fun JSONObject.artworkObjectUrl(): String? {
-    artworkValue("1200")?.let { return it }
-    optJSONArray("sizes")?.firstArtworkUrl()?.let { return it }
-    optJSONArray("variants")?.firstArtworkUrl()?.let { return it }
-    optJSONArray("images")?.firstArtworkUrl()?.let { return it }
-    optJSONObject("sizes")?.artworkObjectUrl()?.let { return it }
-    optJSONObject("variants")?.artworkObjectUrl()?.let { return it }
-    return optionalString("url", "href", "src", "artworkUrl", "imageUrl")
-}
-
-private fun JSONObject.artworkValue(name: String): String? {
-    if (!has(name) || isNull(name)) {
-        return null
-    }
-    return when (val value = opt(name)) {
-        is String -> value.takeIf { it.isNotBlank() }
-        is JSONObject -> value.artworkObjectUrl()
-        else -> null
-    }
-}
-
-private fun JSONArray.firstArtworkUrl(): String? {
-    var fallback: String? = null
-    for (index in 0 until length()) {
-        when (val value = opt(index)) {
-            is String -> if (value.isNotBlank() && fallback == null) fallback = value
-            is JSONObject -> {
-                val url = value.artworkObjectUrl()
-                if (url != null && fallback == null) {
-                    fallback = url
-                }
-                if (url != null && value.matchesArtworkSize()) {
-                    return url
-                }
-            }
-        }
-    }
-    return fallback
-}
-
-private fun JSONObject.matchesArtworkSize(): Boolean {
-    return optionalInt("size", "width", "height") == ARTWORK_SIZE_PX ||
-        optionalString("size", "width", "height") == ARTWORK_SIZE_PX.toString()
+    return (has("artwork") && !isNull("artwork")) ||
+        optionalString("artworkId") != null
 }
 
 private fun JSONObject.stableId(fallbackPrefix: String): String {
-    return optionalString("id", "_id", "${fallbackPrefix}Id") ?: fallbackPrefix
+    return optionalString("id") ?: fallbackPrefix
 }
 
 private fun JSONObject.artistIdList(): List<String> {
-    val directIds = listOfNotNull(optionalString("artistId", "primaryArtistId", "albumArtistId", "trackArtistId"))
+    val directIds = listOfNotNull(optionalString("artistId"))
     val directArrayIds = listOfNotNull(
         optJSONArray("artistIds"),
         optJSONArray("primaryArtistIds"),
@@ -1528,14 +1401,14 @@ private fun JSONObject.artistIdList(): List<String> {
         optJSONArray("primaryArtistEntities"),
     ).flatMap { array -> array.artistIdValues(allowPrimitiveIds = false) }
     val objectIds = listOfNotNull(
-        optJSONObject("artist")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("albumArtist")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("albumArtistEntity")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("primaryArtist")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("primaryArtistEntity")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("trackArtist")?.optionalString("id", "_id", "artistId"),
-        optJSONObject("trackArtistEntity")?.optionalString("id", "_id", "artistId"),
+        optJSONObject("artist")?.optionalString("id"),
+        optJSONObject("artistEntity")?.optionalString("id"),
+        optJSONObject("albumArtist")?.optionalString("id"),
+        optJSONObject("albumArtistEntity")?.optionalString("id"),
+        optJSONObject("primaryArtist")?.optionalString("id"),
+        optJSONObject("primaryArtistEntity")?.optionalString("id"),
+        optJSONObject("trackArtist")?.optionalString("id"),
+        optJSONObject("trackArtistEntity")?.optionalString("id"),
     )
     return (directIds + directArrayIds + dtoArrayIds + objectIds).distinct()
 }
@@ -1545,12 +1418,12 @@ private fun JSONArray.artistIdValues(allowPrimitiveIds: Boolean): List<String> {
         for (index in 0 until length()) {
             when (val value = opt(index)) {
                 is JSONObject -> (
-                    value.optionalString("artistId", "primaryArtistId", "albumArtistId", "trackArtistId")
-                        ?: value.optJSONObject("artist")?.optionalString("id", "_id", "artistId")
-                        ?: value.optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId")
-                        ?: value.optJSONObject("albumArtist")?.optionalString("id", "_id", "artistId")
-                        ?: value.optJSONObject("trackArtist")?.optionalString("id", "_id", "artistId")
-                        ?: value.optionalString("id", "_id")
+                    value.optionalString("artistId")
+                        ?: value.optJSONObject("artist")?.optionalString("id")
+                        ?: value.optJSONObject("artistEntity")?.optionalString("id")
+                        ?: value.optJSONObject("albumArtist")?.optionalString("id")
+                        ?: value.optJSONObject("trackArtist")?.optionalString("id")
+                        ?: value.optionalString("id")
                     )?.let(::add)
                 else -> if (allowPrimitiveIds) {
                     value.toString().takeIf { it.isMeaningfulString() }?.let(::add)
@@ -1561,7 +1434,7 @@ private fun JSONArray.artistIdValues(allowPrimitiveIds: Boolean): List<String> {
 }
 
 private fun JSONObject.artistNameList(): List<String> {
-    val directNames = listOfNotNull(optionalString("artist", "artistName", "albumArtist"))
+    val directNames = listOfNotNull(optionalString("artist"))
     val arrayNames = listOfNotNull(
         optJSONArray("artists"),
         optJSONArray("artistEntities"),
@@ -1576,11 +1449,11 @@ private fun JSONObject.artistNameList(): List<String> {
             for (index in 0 until array.length()) {
                 when (val value = array.opt(index)) {
                     is JSONObject -> (
-                        value.optJSONObject("artist")?.optionalString("name", "title", "artist", "artistName")
-                            ?: value.optJSONObject("artistEntity")?.optionalString("name", "title", "artist", "artistName")
-                            ?: value.optJSONObject("albumArtist")?.optionalString("name", "title", "artist", "artistName")
-                            ?: value.optJSONObject("trackArtist")?.optionalString("name", "title", "artist", "artistName")
-                            ?: value.optionalString("name", "title", "artist", "artistName")
+                        value.optJSONObject("artist")?.optionalString("name")
+                            ?: value.optJSONObject("artistEntity")?.optionalString("name")
+                            ?: value.optJSONObject("albumArtist")?.optionalString("name")
+                            ?: value.optJSONObject("trackArtist")?.optionalString("name")
+                            ?: value.optionalString("name")
                         )?.let(::add)
                     else -> value.toString().takeIf { it.isMeaningfulString() }?.let(::add)
                 }
@@ -1588,14 +1461,14 @@ private fun JSONObject.artistNameList(): List<String> {
         }
     }
     val objectNames = listOfNotNull(
-        optJSONObject("artist")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("artistEntity")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("albumArtist")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("albumArtistEntity")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("primaryArtist")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("primaryArtistEntity")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("trackArtist")?.optionalString("name", "title", "artist", "artistName"),
-        optJSONObject("trackArtistEntity")?.optionalString("name", "title", "artist", "artistName"),
+        optJSONObject("artist")?.optionalString("name"),
+        optJSONObject("artistEntity")?.optionalString("name"),
+        optJSONObject("albumArtist")?.optionalString("name"),
+        optJSONObject("albumArtistEntity")?.optionalString("name"),
+        optJSONObject("primaryArtist")?.optionalString("name"),
+        optJSONObject("primaryArtistEntity")?.optionalString("name"),
+        optJSONObject("trackArtist")?.optionalString("name"),
+        optJSONObject("trackArtistEntity")?.optionalString("name"),
     )
     return (directNames + arrayNames + objectNames)
         .map { it.trim() }
@@ -1618,14 +1491,14 @@ private fun JSONObject.artistReferenceList(vararg arrayNames: String): List<Libr
                             ?: value
                         else -> null
                     }
-                    val id = entity?.optionalString("id", "_id", "artistId")
+                    val id = entity?.optionalString("id")
                     if (id.isNullOrBlank()) {
                         continue
                     }
                     add(
                         LibraryArtist(
                             id = id,
-                            name = entity.optionalString("name", "title", "artist", "artistName") ?: id,
+                            name = entity.optionalString("name") ?: id,
                         ),
                     )
                 }
@@ -1658,35 +1531,35 @@ private fun JSONObject.albumArtistId(): String? {
         ?: optJSONObject("album")
         ?: optJSONObject("albumDto")
         ?: optJSONObject("albumObject")
-    return albumEntity?.optionalString("artistId", "albumArtistId")
-        ?: albumEntity?.optJSONObject("artist")?.optionalString("id", "_id", "artistId")
-        ?: albumEntity?.optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId")
-        ?: albumEntity?.optJSONObject("albumArtist")?.optionalString("id", "_id", "artistId")
-        ?: albumEntity?.optJSONObject("albumArtistEntity")?.optionalString("id", "_id", "artistId")
-        ?: albumEntity?.optJSONObject("primaryArtist")?.optionalString("id", "_id", "artistId")
-        ?: albumEntity?.optJSONObject("primaryArtistEntity")?.optionalString("id", "_id", "artistId")
+    return albumEntity?.optionalString("artistId")
+        ?: albumEntity?.optJSONObject("artist")?.optionalString("id")
+        ?: albumEntity?.optJSONObject("artistEntity")?.optionalString("id")
+        ?: albumEntity?.optJSONObject("albumArtist")?.optionalString("id")
+        ?: albumEntity?.optJSONObject("albumArtistEntity")?.optionalString("id")
+        ?: albumEntity?.optJSONObject("primaryArtist")?.optionalString("id")
+        ?: albumEntity?.optJSONObject("primaryArtistEntity")?.optionalString("id")
         ?: albumEntity?.artistIdList()?.firstOrNull()
         ?: optionalString("albumArtistId")
 }
 
 private fun JSONObject.toAccount(): Account {
     val email = optionalString("email") ?: ""
-    val displayName = optionalString("displayName", "name", "username")
+    val displayName = optionalString("displayName")
         ?: email.substringBefore('@', missingDelimiterValue = "User")
 
     return Account(
-        id = optionalString("id", "_id", "userId") ?: email.ifBlank { "user" },
+        id = optionalString("id") ?: email.ifBlank { "user" },
         displayName = displayName,
         email = email,
-        avatarUrl = optionalString("avatarUrl", "avatar", "picture", "photoUrl", "imageUrl"),
+        avatarUrl = optionalString("avatarUrl"),
         lastFmConnection = accountLastFmConnection(),
-        canPlayMedia = optionalBoolean("canPlayMedia", "can_play_media") ?: true,
+        canPlayMedia = optionalBoolean("canPlayMedia") ?: true,
     )
 }
 
 private fun JSONObject.accountLastFmConnection(): LastFmConnection? {
     val lastFm = optJSONObject("lastfm") ?: optJSONObject("lastFm") ?: return null
-    val username = lastFm.optionalString("username", "name", "lastFmUsername")
+    val username = lastFm.optionalString("username")
     val connected = lastFm.optBoolean("connected", false)
     if (!connected && username.isNullOrBlank()) {
         return null
@@ -1699,18 +1572,18 @@ private fun JSONObject.toPlaylist(): Playlist {
     val trackIds = parseTrackIds()
     val playlistTrackIds = parsePlaylistTrackIds()
     val count = optJSONObject("_count")
-    val trackCount = count?.optionalInt("tracks")
+    val trackCount = optionalInt("trackCount")
+        ?: count?.optionalInt("tracks")
         ?: trackIds.size
     return Playlist(
         id = id,
-        title = optionalString("title", "name") ?: "Untitled playlist",
+        title = expectedStringOrLog("name", "Playlist $id").orEmpty(),
         trackIds = trackIds,
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
         isPublic = optBoolean("isPublic", false),
         playlistTrackIds = playlistTrackIds,
         playlistTrackIdsByTrackId = parsePlaylistTrackIdsByTrackId(),
-        isFavorites = optBoolean("isFavorites", false) ||
-            optionalString("type", "kind", "systemKey")?.equals("favorites", ignoreCase = true) == true,
+        isFavorites = optionalString("kind")?.equals("FAVORITES", ignoreCase = true) == true,
         trackCount = trackCount.coerceAtLeast(trackIds.size),
         totalDurationSeconds = totalDurationSeconds(),
         updatedAt = expectedStringOrLog("updatedAt", "Playlist $id"),
@@ -1722,6 +1595,41 @@ private fun JSONObject.playlistUpdateOrNull(): Playlist? {
     return if (isPlaylistObject()) toPlaylist() else null
 }
 
+private fun JSONObject.playlistMutationUpdateOrNull(playlistId: String): Playlist? {
+    val playlist = playlistUpdateOrNull()
+    val playlistTrack = playlistTrackUpdateOrNull(playlistId)
+    if (playlist == null) {
+        return playlistTrack
+    }
+    if (playlistTrack == null) {
+        return playlist
+    }
+    return playlist.copy(
+        trackIds = playlistTrack.trackIds,
+        playlistTrackIds = playlistTrack.playlistTrackIds,
+        playlistTrackIdsByTrackId = playlistTrack.playlistTrackIdsByTrackId,
+    )
+}
+
+private fun JSONObject.playlistTrackUpdateOrNull(playlistId: String): Playlist? {
+    val row = optJSONObject("playlistTrack")
+        ?: takeIf { has("playlistTrackId") && has("track") }
+        ?: return null
+    val playlistTrackId = row.expectedStringOrLog("playlistTrackId", "Playlist track row")
+        ?: return null
+    val trackId = row.optJSONObject("track")?.expectedStringOrLog("id", "Playlist track row track")
+        ?: row.expectedStringOrLog("trackId", "Playlist track row")
+        ?: return null
+    return Playlist(
+        id = playlistId,
+        title = "",
+        trackIds = listOf(trackId),
+        isOfflineEnabled = false,
+        playlistTrackIds = listOf(playlistTrackId),
+        playlistTrackIdsByTrackId = mapOf(trackId to playlistTrackId),
+    )
+}
+
 private fun JSONObject.parseTrackIds(): List<String> {
     val array = optJSONArray("trackIds") ?: optJSONArray("tracks") ?: return emptyList()
     val ids = mutableListOf<String>()
@@ -1730,10 +1638,13 @@ private fun JSONObject.parseTrackIds(): List<String> {
         when (val item = array.get(index)) {
             is JSONObject -> {
                 val nestedTrack = item.optJSONObject("track")
-                val trackId = nestedTrack?.optionalString("id", "_id", "trackId")
+                val trackId = nestedTrack?.optionalString("id")
                     ?: item.optionalString("trackId")
-                    ?: item.optionalString("id", "_id")
-                trackId?.let(ids::add)
+                if (trackId == null) {
+                    Log.e(API_LOG_TAG, "Playlist track row at index $index is missing expected JSON field 'track.id': $item")
+                } else {
+                    ids += trackId
+                }
             }
             else -> item.toString().takeIf { it.isNotBlank() }?.let(ids::add)
         }
@@ -1743,19 +1654,17 @@ private fun JSONObject.parseTrackIds(): List<String> {
 }
 
 private fun JSONObject.parsePlaylistTrackIds(): List<String> {
-    optJSONArray("playlistTrackIds")?.let { array ->
-        return array.stringItems()
-    }
-
     val array = optJSONArray("tracks") ?: return emptyList()
     val ids = mutableListOf<String>()
 
     for (index in 0 until array.length()) {
         val item = array.optJSONObject(index) ?: continue
-        val nestedTrack = item.optJSONObject("track")
-        val playlistTrackId = item.optionalString("id", "_id", "playlistTrackId")
-            ?: nestedTrack?.optionalString("playlistTrackId")
-        playlistTrackId?.let(ids::add)
+        val playlistTrackId = item.optionalString("playlistTrackId")
+        if (playlistTrackId == null) {
+            Log.e(API_LOG_TAG, "Playlist track row at index $index is missing expected JSON field 'playlistTrackId': $item")
+        } else {
+            ids += playlistTrackId
+        }
     }
 
     return ids
@@ -1776,11 +1685,14 @@ private fun JSONObject.parsePlaylistTrackIdsByTrackId(): Map<String, String> {
     for (index in 0 until array.length()) {
         val item = array.optJSONObject(index) ?: continue
         val nestedTrack = item.optJSONObject("track")
-        val trackId = nestedTrack?.optionalString("id", "_id", "trackId")
+        val trackId = nestedTrack?.optionalString("id")
             ?: item.optionalString("trackId")
             ?: continue
-        val playlistTrackId = item.optionalString("id", "_id", "playlistTrackId")
-            ?: continue
+        val playlistTrackId = item.optionalString("playlistTrackId")
+        if (playlistTrackId == null) {
+            Log.e(API_LOG_TAG, "Playlist track row for track $trackId is missing expected JSON field 'playlistTrackId': $item")
+            continue
+        }
 
         idsByTrackId.putIfAbsent(trackId, playlistTrackId)
     }
@@ -1852,41 +1764,41 @@ private fun JSONObject.toTrack(accentColor: Long): Track {
     }
     return Track(
         id = id,
-        title = optionalString("title", "name") ?: "Untitled track",
-        artist = optionalString("artist", "artistName")
+        title = optionalString("title") ?: "Untitled track",
+        artist = optionalString("artist")
             ?: artistNames.joinToString("; ").takeIf { it.isNotBlank() }
-            ?: albumEntity?.optionalString("artist", "artistName")
+            ?: albumEntity?.optionalString("artist")
             ?: "Unknown artist",
-        album = albumEntity?.optionalString("title", "name")
-            ?: optionalString("album", "albumTitle")
+        album = optionalString("albumTitle")
+            ?: albumEntity?.optionalString("title")
             ?: "Unknown album",
         durationSeconds = durationSeconds(),
-        serverPath = optionalString("serverPath", "filePath", "streamPath", "path") ?: "/tracks/$id",
+        serverPath = optionalString("serverPath") ?: "/tracks/$id",
         accentColor = accentColor,
         downloadState = DownloadState.NotDownloaded,
         playCount = optInt("playCount", 0),
         artistId = artistIds.firstOrNull(),
         artistIds = artistIds,
         artists = trackArtistReferences,
-        albumId = optionalString("albumId") ?: albumEntity?.optionalString("id", "_id", "albumId"),
-        albumArtist = albumEntity?.optionalString("artist", "artistName")
+        albumId = optionalString("albumId") ?: albumEntity?.optionalString("id"),
+        albumArtist = albumEntity?.optionalString("artist")
             ?: albumArtistNames.joinToString("; ").takeIf { it.isNotBlank() }
             ?: optionalString("albumArtist"),
         albumArtistId = albumArtistId() ?: albumArtistIds.firstOrNull(),
         albumArtists = albumArtistReferences,
-        trackNumber = optionalInt("trackNumber", "position", "discTrackNumber"),
+        trackNumber = optionalInt("trackNumber"),
         discNumber = optionalInt("discNumber"),
-        releaseYear = optionalInt("releaseYear", "year")
-            ?: albumEntity?.optionalInt("releaseYear", "year"),
+        releaseYear = optionalInt("releaseYear")
+            ?: albumEntity?.optionalInt("releaseYear"),
         genre = optionalString("genre"),
-        isLiked = optionalBoolean("isLiked", "liked", "isFavorite", "favorite"),
+        isLiked = optionalBoolean("isLiked"),
         foundInLyrics = optionalBoolean("foundInLyrics") == true,
     )
 }
 
 private fun JSONObject.toTrackLyrics(): TrackLyrics? {
-    val plainLyrics = optionalString("plainLyrics", "plain", "lyrics")
-    val syncedLyrics = optionalString("syncedLyrics", "synced", "lrc")
+    val plainLyrics = optionalString("plainLyrics")
+    val syncedLyrics = optionalString("syncedLyrics")
     val instrumental = optBoolean("instrumental", false)
     if (!instrumental && plainLyrics == null && syncedLyrics == null) {
         return null
@@ -1905,34 +1817,20 @@ private fun String.toTrackLyricsPayload(): TrackLyrics? {
 }
 
 private fun JSONObject.toLibraryArtist(): LibraryArtist? {
-    val id = optionalString("id", "_id", "artistId") ?: return null
-    val name = optionalString("name", "artist", "artistName", "title") ?: id
+    val id = optionalString("id") ?: return null
+    val name = expectedStringOrLog("name", "Artist $id") ?: return null
     val count = optJSONObject("_count")
     return LibraryArtist(
         name = name,
         id = id,
-        albumCount = optionalInt("albumCount", "albumsCount")
+        albumCount = optionalInt("albumCount")
             ?: count?.optionalInt("albums")
             ?: 0,
-        trackCount = optionalInt("trackCount", "tracksCount")
+        trackCount = optionalInt("trackCount")
             ?: count?.optionalInt("tracks")
             ?: 0,
-        representativeAlbumId = optionalString(
-            "latestReleaseAlbumId",
-            "lastReleaseAlbumId",
-            "latestOwnReleaseAlbumId",
-            "lastOwnReleaseAlbumId",
-            "ownLatestReleaseAlbumId",
-            "latestAlbumId",
-            "lastAlbumId",
-            "representativeAlbumId",
-            "albumId",
-        )
-            ?: optJSONObject("latestRelease")?.optionalString("id", "_id", "albumId")
-            ?: optJSONObject("lastRelease")?.optionalString("id", "_id", "albumId")
-            ?: optJSONObject("latestOwnRelease")?.optionalString("id", "_id", "albumId")
-            ?: optJSONObject("latestAlbum")?.optionalString("id", "_id", "albumId")
-            ?: optJSONObject("representativeAlbum")?.optionalString("id", "_id", "albumId"),
+        representativeAlbumId = optionalString("representativeAlbumId"),
+        latestReleaseYear = optionalInt("latestReleaseYear"),
         similarity = optJSONObject("similarity")?.toArtistSimilarity(),
     )
 }
@@ -1947,7 +1845,7 @@ private fun JSONObject.toArtistSimilarity(): ArtistSimilarity? {
 }
 
 private fun JSONObject.toRecentAlbumChange(): RecentAlbumChange? {
-    val type = optionalString("type", "recentChangeType") ?: return null
+    val type = optionalString("type") ?: return null
     return RecentAlbumChange(
         type = type,
         latestTrackCreatedAt = optionalString("latestTrackCreatedAt"),
@@ -1957,7 +1855,7 @@ private fun JSONObject.toRecentAlbumChange(): RecentAlbumChange? {
 
 private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
     val id = stableId("album")
-    val title = optionalString("title", "name", "albumTitle") ?: return null
+    val title = optionalString("title") ?: return null
     val rawArtistReferences = artistReferenceList(
         "artists",
         "albumArtists",
@@ -1972,18 +1870,18 @@ private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
     val artistReferences = rawArtistReferences.ifEmpty {
         artistReferencesFromIdsAndNames(artistIds, artistNames)
     }
-    val artist = optionalString("artist", "artistName", "albumArtist")
+    val artist = optionalString("artist")
         ?: artistReferences.joinToString("; ") { it.name }.takeIf { it.isNotBlank() }
         ?: artistNames.joinToString("; ").takeIf { it.isNotBlank() }
-        ?: optJSONObject("artistEntity")?.optionalString("name", "title")
+        ?: optJSONObject("artistEntity")?.optionalString("name")
         ?: "Unknown artist"
-    val artistId = optionalString("artistId", "albumArtistId")
-        ?: optJSONObject("artist")?.optionalString("id", "_id", "artistId")
-        ?: optJSONObject("artistEntity")?.optionalString("id", "_id", "artistId")
-        ?: optJSONObject("albumArtist")?.optionalString("id", "_id", "artistId")
-        ?: optJSONObject("albumArtistEntity")?.optionalString("id", "_id", "artistId")
-        ?: optJSONObject("primaryArtist")?.optionalString("id", "_id", "artistId")
-        ?: optJSONObject("primaryArtistEntity")?.optionalString("id", "_id", "artistId")
+    val artistId = optionalString("artistId")
+        ?: optJSONObject("artist")?.optionalString("id")
+        ?: optJSONObject("artistEntity")?.optionalString("id")
+        ?: optJSONObject("albumArtist")?.optionalString("id")
+        ?: optJSONObject("albumArtistEntity")?.optionalString("id")
+        ?: optJSONObject("primaryArtist")?.optionalString("id")
+        ?: optJSONObject("primaryArtistEntity")?.optionalString("id")
         ?: artistReferences.firstOrNull()?.id
         ?: artistIds.firstOrNull()
     val count = optJSONObject("_count")
@@ -1996,18 +1894,18 @@ private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
         artistId = artistId,
         artistIds = artistIds,
         artists = artistReferences,
-        releaseYear = optionalInt("releaseYear", "year"),
+        releaseYear = optionalInt("releaseYear"),
         genre = optionalString("genre"),
-        trackCount = optionalInt("trackCount", "tracksCount")
+        trackCount = optionalInt("trackCount")
             ?: count?.optionalInt("tracks")
             ?: optJSONArray("tracks")?.length()
             ?: 0,
         accentColor = stableAccentColorFor(id),
-        artworkTrackId = optionalString("artworkTrackId", "coverTrackId", "firstTrackId", "trackId")
-            ?: optJSONObject("track")?.optionalString("id", "_id", "trackId")
+        artworkTrackId = optionalString("artworkTrackId")
+            ?: optJSONObject("track")?.optionalString("id")
             ?: optJSONArray("tracks")?.optJSONObject(0)?.let { item ->
-                item.optJSONObject("track")?.optionalString("id", "_id", "trackId")
-                    ?: item.optionalString("trackId", "id", "_id")
+                item.optJSONObject("track")?.optionalString("id")
+                    ?: item.optionalString("trackId")
             },
         savedByCurrentUser = optBoolean("savedByCurrentUser", false),
         isOfflineEnabled = optBoolean("isOfflineEnabled", false),
@@ -2021,7 +1919,7 @@ private fun JSONObject.toLibraryAlbum(): LibraryAlbum? {
 }
 
 private fun JSONObject.toLastFmConnection(): LastFmConnection {
-    val username = optionalString("username", "name", "lastFmUsername")
+    val username = optionalString("username")
     return LastFmConnection(
         username = username,
         state = when {
@@ -2043,8 +1941,8 @@ private fun JSONObject.durationSeconds(): Int {
 }
 
 private fun JSONObject.totalDurationSeconds(): Int? {
-    optionalInt("totalDurationSeconds", "durationSeconds")?.let { return it.coerceAtLeast(0) }
-    optionalInt("totalDurationMs", "durationMs")?.let { return (it / 1000).coerceAtLeast(0) }
+    optionalInt("totalDurationSeconds")?.let { return it.coerceAtLeast(0) }
+    optionalInt("totalDurationMs")?.let { return (it / 1000).coerceAtLeast(0) }
     optJSONObject("_sum")?.let { sum ->
         sum.optionalInt("durationSeconds")?.let { return it.coerceAtLeast(0) }
         sum.optionalInt("durationMs")?.let { return (it / 1000).coerceAtLeast(0) }
@@ -2093,37 +1991,42 @@ private fun String.toPlaylistPayload(): PlaylistPayload {
     )
 }
 
-private fun String.toFavoritesPlaylistPayload(
-    fallbackPlaylistId: String?,
-    fallbackIsOfflineEnabled: Boolean,
-): PlaylistPayload {
-    val root = JSONObject(trim()).payloadObject()
+private fun String.toFavoritesPlaylistPayload(): PlaylistPayload {
+    val response = JSONObject(trim())
+    val root = response.payloadObject()
     val playlistObject = root.optJSONObject("playlist")
         ?: root.takeIf { it.isPlaylistObject() }
-    val tracks = root.embeddedTracks().distinctBy { it.id }
-    val trackIds = root.parseTrackIds().ifEmpty { tracks.map { it.id } }
-    val playlistTrackIds = root.parsePlaylistTrackIds()
-    val trackCount = root.optJSONObject("_count")?.optionalInt("tracks")
-        ?: root.optionalInt("total", "trackCount", "tracksCount")
-        ?: playlistObject?.optJSONObject("_count")?.optionalInt("tracks")
-        ?: playlistObject?.optionalInt("total", "trackCount", "tracksCount")
+    val playlistSource = playlistObject ?: root
+    val tracks = playlistSource.embeddedTracks().distinctBy { it.id }
+    val trackIds = playlistSource.parseTrackIds().ifEmpty { tracks.map { it.id } }
+    val playlistTrackIds = playlistSource.parsePlaylistTrackIds()
+    val trackCount = playlistSource.optJSONObject("_count")?.optionalInt("tracks")
+        ?: playlistSource.optionalInt("total")
+        ?: playlistSource.paginationTotalCount()
+        ?: response.paginationTotalCount()
         ?: trackIds.size
-    val playlistTrackIdsByTrackId = root.parsePlaylistTrackIdsByTrackId()
-    val basePlaylist = playlistObject?.toPlaylist()
+    val playlistTrackIdsByTrackId = playlistSource.parsePlaylistTrackIdsByTrackId()
+    val playlistId = playlistObject?.expectedStringOrLog("id", "Favorites playlist")
+        ?: root.expectedStringOrLog("id", "Favorites playlist")
+        ?: return PlaylistPayload(playlists = emptyList(), tracks = tracks)
+    val playlistTitle = playlistObject?.expectedStringOrLog("name", "Favorites playlist")
+        ?: root.expectedStringOrLog("name", "Favorites playlist")
+        ?: return PlaylistPayload(playlists = emptyList(), tracks = tracks)
     val playlist = Playlist(
-        id = fallbackPlaylistId
-            ?: basePlaylist?.id
-            ?: root.optionalString("id", "_id", "playlistId")
-            ?: "favorites",
-        title = basePlaylist?.title?.takeIf { it.isNotBlank() } ?: "Favorites",
+        id = playlistId,
+        title = playlistTitle,
         trackIds = trackIds,
-        isOfflineEnabled = fallbackIsOfflineEnabled || basePlaylist?.isOfflineEnabled == true,
-        isPublic = basePlaylist?.isPublic == true,
+        isOfflineEnabled = playlistSource.optionalBoolean("isOfflineEnabled")
+            ?: false,
+        isPublic = playlistSource.optionalBoolean("isPublic")
+            ?: false,
         playlistTrackIds = playlistTrackIds,
         playlistTrackIdsByTrackId = playlistTrackIdsByTrackId,
         isFavorites = true,
         trackCount = trackCount.coerceAtLeast(trackIds.size),
-        totalDurationSeconds = root.totalDurationSeconds() ?: basePlaylist?.totalDurationSeconds,
+        totalDurationSeconds = playlistSource.totalDurationSeconds()
+            ?: root.totalDurationSeconds(),
+        updatedAt = playlistSource.expectedStringOrLog("updatedAt", "Favorites playlist"),
     )
 
     return PlaylistPayload(
@@ -2156,14 +2059,13 @@ private fun String.playlistJsonObjects(): List<JSONObject> {
 }
 
 private fun JSONObject.isPlaylistObject(): Boolean {
-    val hasIdentity = optionalString("id", "_id", "playlistId") != null ||
-        optionalString("title", "name") != null
-    val hasPlaylistShape = optionalString("title", "name") != null ||
-        has("isFavorites") ||
+    val hasIdentity = optionalString("id") != null ||
+        optionalString("name") != null
+    val hasPlaylistShape = optionalString("name") != null ||
         has("isPublic") ||
         has("trackIds") ||
         optJSONObject("_count")?.has("tracks") == true ||
-        optionalString("type", "kind", "systemKey")?.equals("favorites", ignoreCase = true) == true
+        optionalString("kind")?.equals("FAVORITES", ignoreCase = true) == true
     return hasIdentity && hasPlaylistShape
 }
 
@@ -2238,22 +2140,23 @@ private fun String.toSimilarArtists(): List<LibraryArtist> {
     return values.mapNotNull { value ->
         when (value) {
             is JSONObject -> value.toSimilarArtist()
-            else -> value.toString().takeIf { it.isNotBlank() }?.let { LibraryArtist(name = it, id = it) }
+            else -> null
         }
     }.distinctBy { it.id }
 }
 
 private fun JSONObject.toSimilarArtist(): LibraryArtist? {
     val nestedArtist = optJSONObject("artist")
-    val parsed = nestedArtist?.toLibraryArtist() ?: toLibraryArtist()
+    val parsed = nestedArtist?.toLibraryArtist()
+        ?: takeIf { has("name") }?.toLibraryArtist()
     val similarity = optJSONObject("similarity")?.toArtistSimilarity()
     if (parsed != null) {
         return parsed.copy(similarity = similarity ?: parsed.similarity)
     }
-    val id = optionalString("id", "_id", "artistId") ?: return null
+    val id = expectedStringOrLog("id", "Similar artist") ?: return null
     return LibraryArtist(
-        name = optionalString("name", "artist", "artistName", "title") ?: id,
         id = id,
+        name = "",
         similarity = similarity,
     )
 }

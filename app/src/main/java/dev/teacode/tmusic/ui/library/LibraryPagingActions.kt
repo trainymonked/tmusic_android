@@ -2,6 +2,7 @@ package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
+import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
 import kotlinx.coroutines.CoroutineScope
@@ -10,10 +11,12 @@ import kotlinx.coroutines.launch
 internal fun loadMoreArtistsAction(
     scope: CoroutineScope,
     canUseServerRequests: () -> Boolean,
+    sortOption: ArtistSortOption,
     getLibraryPaging: () -> LibraryPagingState,
     setLibraryPaging: (LibraryPagingState) -> Unit,
     getArtists: () -> List<LibraryArtist>,
     setArtists: (List<LibraryArtist>) -> Unit,
+    setArtistServerSortOption: (ArtistSortOption) -> Unit,
     musicRepository: RemoteMusicRepository,
     authRepository: RemoteAuthRepository,
     setAccessToken: (String?) -> Unit,
@@ -29,19 +32,77 @@ internal fun loadMoreArtistsAction(
     val offset = paging.artistNextOffset.coerceAtLeast(0)
     scope.launch {
         runCatching {
-            musicRepository.libraryArtistsPageWithTotal(limit = SCREEN_PAGE_LIMIT, offset = offset)
+            musicRepository.libraryArtistsPageWithTotal(
+                limit = SCREEN_PAGE_LIMIT,
+                offset = offset,
+                sortOption = sortOption,
+            )
         }.onSuccess { artistPage ->
             val loadedArtists = artistPage.artists
+            val nextArtists = (getArtists() + loadedArtists).distinctBy { it.id }
+            val nextOffset = offset + loadedArtists.size
+            val hasMore = loadedArtists.size >= SCREEN_PAGE_LIMIT
             setAccessToken(authRepository.accessToken())
-            setArtists(
-                (getArtists() + loadedArtists)
-                    .distinctBy { it.id }
-                    .sortedArtistsForDisplay(),
-            )
+            setArtists(nextArtists)
+            setArtistServerSortOption(sortOption)
             setLibraryPaging(
                 getLibraryPaging().copy(
-                    artistNextOffset = offset + loadedArtists.size,
-                    artistHasMore = loadedArtists.size >= SCREEN_PAGE_LIMIT,
+                    artistNextOffset = nextOffset,
+                    artistHasMore = hasMore,
+                ),
+            )
+        }.onFailure { error ->
+            markServerUnavailable(error)
+            setLibraryError(error.userMessage())
+        }
+        setLibraryPaging(getLibraryPaging().copy(artistLoadingMore = false))
+    }
+}
+
+internal fun reloadArtistsAction(
+    scope: CoroutineScope,
+    canUseServerRequests: () -> Boolean,
+    sortOption: ArtistSortOption,
+    getLibraryPaging: () -> LibraryPagingState,
+    setLibraryPaging: (LibraryPagingState) -> Unit,
+    setArtists: (List<LibraryArtist>) -> Unit,
+    setArtistServerSortOption: (ArtistSortOption) -> Unit,
+    musicRepository: RemoteMusicRepository,
+    authRepository: RemoteAuthRepository,
+    setAccessToken: (String?) -> Unit,
+    markServerUnavailable: (Throwable) -> Unit,
+    setLibraryError: (String?) -> Unit,
+) {
+    val paging = getLibraryPaging()
+    if (!canUseServerRequests() || paging.artistLoadingMore) {
+        return
+    }
+
+    setLibraryPaging(
+        paging.copy(
+            artistLoadingMore = true,
+            artistNextOffset = 0,
+            artistHasMore = true,
+        ),
+    )
+    scope.launch {
+        runCatching {
+            musicRepository.libraryArtistsPageWithTotal(
+                limit = SCREEN_PAGE_LIMIT,
+                offset = 0,
+                sortOption = sortOption,
+            )
+        }.onSuccess { artistPage ->
+            val loadedArtists = artistPage.artists
+            val nextOffset = loadedArtists.size
+            val hasMore = loadedArtists.size >= SCREEN_PAGE_LIMIT
+            setAccessToken(authRepository.accessToken())
+            setArtists(loadedArtists)
+            setArtistServerSortOption(sortOption)
+            setLibraryPaging(
+                getLibraryPaging().copy(
+                    artistNextOffset = nextOffset,
+                    artistHasMore = hasMore,
                 ),
             )
         }.onFailure { error ->

@@ -5,6 +5,7 @@ import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.LastFmAuthTokenStore
 import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.UserPreferencesStore
+import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.LastFmConnection
@@ -21,6 +22,8 @@ import kotlinx.coroutines.withTimeout
 
 internal suspend fun fetchLibraryState(
     targetDestination: AppDestination,
+    artistSortOption: ArtistSortOption,
+    cachedPlaylists: List<Playlist>,
     authRepository: RemoteAuthRepository,
     musicRepository: RemoteMusicRepository,
 ): LoadedLibraryState {
@@ -38,20 +41,35 @@ internal suspend fun fetchLibraryState(
     )
     loadedPlaylists = baseLibrary.playlists
     loadedTracks = baseLibrary.tracks
+    if (shouldLoadFullFavoritesPayload(cachedPlaylists, loadedPlaylists.orEmpty())) {
+        val favoritesPayload = musicRepository.favoritesPlaylistPayload()
+        if (favoritesPayload.playlists.isNotEmpty()) {
+            loadedPlaylists = loadedPlaylists.orEmpty().mergeLoadedPlaylists(favoritesPayload.playlists)
+        }
+        if (favoritesPayload.tracks.isNotEmpty()) {
+            loadedTracks = (loadedTracks.orEmpty() + favoritesPayload.tracks).distinctBy { it.id }
+        }
+    }
     loadedSavedAlbums = musicRepository.savedAlbumsPage(limit = SCREEN_PAGE_LIMIT)
 
     when (targetDestination.tab) {
         AppTab.Home -> when (targetDestination.homeRoute) {
             HomeRoute.Overview -> {
-                val artistPage = musicRepository.libraryArtistsPageWithTotal(limit = HOME_ARTIST_PREVIEW_LIMIT)
-                loadedArtists = artistPage.artists.filterOwnReleaseArtists()
+                val artistPage = musicRepository.libraryArtistsPageWithTotal(
+                    limit = HOME_ARTIST_PREVIEW_LIMIT,
+                    sortOption = ArtistSortOption.TrackCount,
+                )
+                loadedArtists = artistPage.artists
                 loadedRecentAlbums = runCatching {
                     musicRepository.recentAlbums(limit = HOME_RECENT_ALBUM_PAGE_LIMIT)
                 }.getOrNull()
             }
             HomeRoute.Artists -> {
-                val artistPage = musicRepository.libraryArtistsPageWithTotal(limit = SCREEN_PAGE_LIMIT)
-                loadedArtists = artistPage.artists.filterOwnReleaseArtists()
+                val artistPage = musicRepository.libraryArtistsPageWithTotal(
+                    limit = SCREEN_PAGE_LIMIT,
+                    sortOption = artistSortOption,
+                )
+                loadedArtists = artistPage.artists
             }
             HomeRoute.Albums -> {
                 loadedAlbums = musicRepository.libraryAlbumsPage(limit = SCREEN_PAGE_LIMIT)
@@ -84,6 +102,7 @@ internal suspend fun fetchLibraryState(
 internal fun loadLibraryAction(
     scope: CoroutineScope,
     targetDestination: AppDestination,
+    artistSortOption: ArtistSortOption,
     getLibraryLoadSerial: () -> Int,
     setLibraryLoadSerial: (Int) -> Unit,
     getLibraryLoadJob: () -> Job?,
@@ -106,6 +125,7 @@ internal fun loadLibraryAction(
     setDatabaseTrackCount: (Int?) -> Unit,
     getArtists: () -> List<LibraryArtist>,
     setArtists: (List<LibraryArtist>) -> Unit,
+    setArtistServerSortOption: (ArtistSortOption?) -> Unit,
     getAlbums: () -> List<LibraryAlbum>,
     setAlbums: (List<LibraryAlbum>) -> Unit,
     getSavedAlbums: () -> List<LibraryAlbum>,
@@ -172,6 +192,8 @@ internal fun loadLibraryAction(
                 withTimeout(SERVER_SYNC_HARD_TIMEOUT_MS) {
                     fetchLibraryState(
                         targetDestination = targetDestination,
+                        artistSortOption = artistSortOption,
+                        cachedPlaylists = getPlaylists(),
                         authRepository = authRepository,
                         musicRepository = musicRepository,
                     )
@@ -197,6 +219,9 @@ internal fun loadLibraryAction(
                 setRecentAlbums(mergedLibrary.recentAlbums)
                 setDatabaseTrackCount(mergedLibrary.databaseTrackCount)
                 setArtists(mergedLibrary.artists)
+                if (loadedState.artists != null) {
+                    setArtistServerSortOption(targetDestination.artistServerSortOption(artistSortOption))
+                }
                 setAlbums(mergedLibrary.albums)
                 setSavedAlbums(mergedLibrary.savedAlbums)
                 mergedLibrary.artistListNextOffset?.let { offset ->
@@ -289,4 +314,30 @@ internal fun loadLibraryAction(
         }
     }
     setLibraryLoadJob(loadJob)
+}
+
+private fun AppDestination.artistServerSortOption(currentSortOption: ArtistSortOption): ArtistSortOption? {
+    return when {
+        tab == AppTab.Home && homeRoute == HomeRoute.Overview -> ArtistSortOption.TrackCount
+        tab == AppTab.Home && homeRoute == HomeRoute.Artists -> currentSortOption
+        else -> null
+    }
+}
+
+private fun shouldLoadFullFavoritesPayload(
+    cachedPlaylists: List<Playlist>,
+    serverPlaylists: List<Playlist>,
+): Boolean {
+    val serverFavorites = serverPlaylists.firstOrNull { it.isFavoritesPlaylist() }
+    val cachedFavorites = cachedPlaylists.firstOrNull { cachedPlaylist ->
+        cachedPlaylist.isFavoritesPlaylist() ||
+            serverFavorites?.let { cachedPlaylist.id == it.id } == true
+    } ?: return true
+    if (serverFavorites == null) {
+        return cachedFavorites.trackIds.size > cachedFavorites.playlistTrackIdsByTrackId.size
+    }
+    if (serverFavorites.trackCount <= 0) {
+        return cachedFavorites.trackIds.size > cachedFavorites.playlistTrackIdsByTrackId.size
+    }
+    return cachedFavorites.playlistTrackIdsByTrackId.size < serverFavorites.trackCount
 }

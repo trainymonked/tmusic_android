@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
 import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LastFmConnection
 import dev.teacode.tmusic.domain.LibraryAlbum
@@ -46,6 +47,8 @@ internal fun MainShell(
     databaseTrackCount: Int?,
     offlineAlbumIds: Set<String>,
     offlinePlayableTrackIds: Set<String>,
+    artistSortOption: ArtistSortOption,
+    artistServerSortOption: ArtistSortOption?,
     artists: List<LibraryArtist>,
     albums: List<LibraryAlbum>,
     savedAlbums: List<LibraryAlbum>,
@@ -57,6 +60,8 @@ internal fun MainShell(
     similarArtistLoadsInProgress: Set<String>,
     albumTrackLoadsInProgress: Set<String>,
     playlistTrackLoadsInProgress: Set<String>,
+    activePlaylistDownloadIds: Set<String>,
+    activeAlbumDownloadIds: Set<String>,
     artistListLoadingMore: Boolean,
     albumListLoadingMore: Boolean,
     recentAlbumsLoadingMore: Boolean,
@@ -99,6 +104,7 @@ internal fun MainShell(
     errorMessage: String?,
     noticeMessage: String?,
     useLocalBackend: Boolean,
+    showLocalBackendOption: Boolean,
     canUseServerRequests: Boolean,
     syncMode: SyncMode,
     lastFmConnection: LastFmConnection,
@@ -122,6 +128,7 @@ internal fun MainShell(
     onRefreshArtist: (LibraryArtist) -> Unit,
     onRefreshAlbum: (LibraryAlbum) -> Unit,
     onLoadMoreArtists: () -> Unit,
+    onArtistSortChange: (ArtistSortOption) -> Unit,
     onLoadMoreAlbums: () -> Unit,
     onLoadMoreRecentAlbums: () -> Unit,
     onLoadMoreAlbumTracks: (LibraryAlbum) -> Unit,
@@ -201,13 +208,29 @@ internal fun MainShell(
         !lastFmConnection.username.isNullOrBlank()
     val topErrorMessage = playerError ?: errorMessage
     val cleanPlaylists = playlists.sanitizeClientPlaylists()
-    val knownTrackLikeStates = (tracks + searchResults.tracks + albumTracksById.values.flatten() + looseTracksByArtist.values.flatten() + queueTracks)
+    val knownTrackLikeStates = (
+        tracks +
+            searchResults.tracks +
+            albumTracksById.values.flatten() +
+            looseTracksByArtist.values.flatten() +
+            queueTracks +
+            listOfNotNull(playerState.currentTrack)
+        )
         .mapNotNull { track -> track.isLiked?.let { isLiked -> track.id to isLiked } }
-        .toMap()
-    val favoriteTrackIds = (
-        cleanPlaylists.firstOrNull { it.isFavoritesPlaylist() }?.trackIds?.toSet().orEmpty() +
-            knownTrackLikeStates.filterValues { it }.keys
-        ) - knownTrackLikeStates.filterValues { !it }.keys
+    val knownLikedTrackIds = knownTrackLikeStates
+        .filter { (_, isLiked) -> isLiked }
+        .map { (trackId, _) -> trackId }
+        .toSet()
+    val knownUnlikedTrackIds = knownTrackLikeStates
+        .filter { (_, isLiked) -> !isLiked }
+        .map { (trackId, _) -> trackId }
+        .toSet()
+    val favoritePlaylistTrackIds = cleanPlaylists
+        .firstOrNull { it.isFavoritesPlaylist() }
+        ?.trackIds
+        ?.toSet()
+        .orEmpty()
+    val favoriteTrackIds = (favoritePlaylistTrackIds + knownLikedTrackIds) - knownUnlikedTrackIds
     val locallyPlayableTrackIds = (tracks + albumTracksById.values.flatten())
         .filter { track -> track.downloadState == DownloadState.Downloaded || track.id in offlinePlayableTrackIds }
         .map { it.id }
@@ -237,16 +260,20 @@ internal fun MainShell(
     }
     val downloadedAlbums = tracks.downloadedAlbums(offlineAlbumIds)
     val downloadedAlbumTracksById = tracks.downloadedAlbumTracksById(offlineAlbumIds)
-    val allVisibleArtists = if (onlineMode) {
-        artists.sortedArtistsForDisplay()
+    val visibleArtistSortOption = if (destination.isHomeOverview()) {
+        ArtistSortOption.TrackCount
     } else {
-        artists.sortedArtistsForDisplay().ifEmpty { tracks.downloadedArtists() }
+        artistSortOption
     }
-    val visibleArtists = if (onlineMode) {
-        allVisibleArtists.filterOwnReleaseArtists()
+    val canShowServerArtists = artistServerSortOption == visibleArtistSortOption
+    val allVisibleArtists = if (onlineMode && canShowServerArtists) {
+        artists.sortedArtistsForDisplay(visibleArtistSortOption)
+    } else if (!onlineMode && canShowServerArtists) {
+        artists.sortedArtistsForDisplay(visibleArtistSortOption)
     } else {
-        allVisibleArtists
+        emptyList()
     }
+    val visibleArtists = allVisibleArtists
     val offlineLibraryAlbums = (albums + savedAlbums + downloadedAlbums)
         .filter { album ->
             album.savedByCurrentUser ||
@@ -545,6 +572,8 @@ internal fun MainShell(
                             isLoadingMore = artistListLoadingMore,
                             canLoadMore = onlineMode && artistListHasMore,
                             offlineNotice = if (!onlineMode) "Offline. Showing cached artists." else null,
+                            sortOption = artistSortOption,
+                            onSortOptionChange = onArtistSortChange,
                             onRefresh = onRefreshHome,
                             onLoadMore = onLoadMoreArtists,
                             onRequestArtwork = onRequestArtwork,
@@ -608,6 +637,7 @@ internal fun MainShell(
                             isPlaybackPlaying = playerState.isPlaying,
                             canPlayFromNetwork = canPlayRemoteTracks,
                             canDownload = account.canPlayMedia,
+                            isDownloadActive = selectedAlbum?.id?.let { it in activeAlbumDownloadIds } == true,
                             offlinePlayableTrackIds = mediaPlayableTrackIds,
                             onRefresh = {
                                 selectedAlbum?.let(onRefreshAlbum)
@@ -690,7 +720,10 @@ internal fun MainShell(
                         ) {
                             displayPlaylist.tracksFrom(playlistTrackSource)
                         }
-                        val hasPlaylistTrackState = displayPlaylist.id in playlistTrackHasMoreById ||
+                        val hasCachedFavoriteTracks = displayPlaylist.isFavoritesPlaylist() &&
+                            rawPlaylistTracks.isNotEmpty()
+                        val hasPlaylistTrackState = hasCachedFavoriteTracks ||
+                            displayPlaylist.id in playlistTrackHasMoreById ||
                             rawPlaylistTracks.size >= displayPlaylist.trackCount
                         val playlistTracks = if (onlineMode && !hasPlaylistTrackState) {
                             emptyList()
@@ -745,13 +778,15 @@ internal fun MainShell(
                             canPlayFromNetwork = canPlayRemoteTracks,
                             offlinePlayableTrackIds = mediaPlayableTrackIds,
                             downloadedTrackIds = downloadedTrackIds,
+                            isDownloadActive = selectedPlaylist.id in activePlaylistDownloadIds,
                             onTogglePlayback = onTogglePlayback,
                             artworkBitmaps = artworkBitmaps,
                             onRequestArtwork = onRequestArtwork,
                             isLoadingMore = selectedPlaylist.id in playlistTrackLoadsInProgress,
                             canLoadMore = onlineMode &&
+                                !selectedPlaylist.isFavoritesPlaylist() &&
                                 playlistTrackHasMoreById[selectedPlaylist.id] != false &&
-                                selectedPlaylist.trackIds.size < selectedPlaylist.trackCount,
+                                playlistTracks.size < selectedPlaylist.trackCount,
                             onLoadMore = { onLoadMorePlaylistTracks(selectedPlaylist) },
                             offlineNotice = if (!onlineMode && !displayPlaylist.isOfflineEnabled) {
                                 "Offline. Showing cached playlist data."
@@ -796,6 +831,7 @@ internal fun MainShell(
                     account = account,
                     avatarBitmap = profileAvatarBitmap,
                     useLocalBackend = useLocalBackend,
+                    showLocalBackendOption = showLocalBackendOption,
                     canUseNetwork = canUseServerRequests,
                     syncMode = syncMode,
                     lastFmConnection = lastFmConnection,

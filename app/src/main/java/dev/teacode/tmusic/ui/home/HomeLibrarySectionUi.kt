@@ -48,7 +48,10 @@ fun HorizontalLibrarySection(
             }
         }
         if (isEmpty) {
-            EmptyState(emptyText)
+            EmptyState(
+                text = emptyText,
+                modifier = Modifier.padding(horizontal = ScreenHorizontalPadding),
+            )
         } else {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = ScreenHorizontalPadding),

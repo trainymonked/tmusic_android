@@ -25,9 +25,7 @@ internal fun downloadedArtworkKeys(
 }
 
 internal fun artworkCacheKeysFor(artworkKeys: Set<String>): Set<String> {
-    return artworkKeys.flatMap { artworkKey ->
-        ArtworkImageSize.entries.map { imageSize -> artworkCacheKey(artworkKey, imageSize) }
-    }.toSet()
+    return artworkKeys.map { artworkKey -> artworkCacheKey(artworkKey, ArtworkImageSize.FullPlayer) }.toSet()
 }
 
 internal fun downloadedArtworkCacheKeys(

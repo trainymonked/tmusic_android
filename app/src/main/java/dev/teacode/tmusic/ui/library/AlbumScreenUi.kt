@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -21,13 +22,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +37,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.Track
 
@@ -52,6 +55,7 @@ fun AlbumScreen(
     isPlaybackPlaying: Boolean,
     canPlayFromNetwork: Boolean,
     canDownload: Boolean,
+    isDownloadActive: Boolean,
     offlinePlayableTrackIds: Set<String>,
     onRefresh: () -> Unit,
     isLoadingMore: Boolean,
@@ -82,6 +86,14 @@ fun AlbumScreen(
         loadedTrackCount = tracks.size,
         tracks = tracks,
     )
+    val albumDownloadProgressPercent = remember(album?.isOfflineEnabled, expectedTrackCount, tracks) {
+        if (album?.isOfflineEnabled == true && expectedTrackCount > 0) {
+            val downloadedTrackCount = tracks.count { it.downloadState == DownloadState.Downloaded }
+            ((downloadedTrackCount * 100) / expectedTrackCount).coerceIn(0, 100)
+        } else {
+            null
+        }
+    }
     LaunchedEffect(coverTrackId) {
         coverTrackId?.let { onRequestArtwork(it, ArtworkImageSize.FullPlayer) }
     }
@@ -136,12 +148,17 @@ fun AlbumScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(
+                        Button(
                             onClick = if (isActiveAlbum) onTogglePlayback else onPlayAlbum,
                             enabled = playableTracks.isNotEmpty(),
+                            modifier = Modifier
+                                .height(44.dp)
+                                .width(132.dp),
+                            shape = RoundedCornerShape(8.dp),
                         ) {
                             Icon(
                                 imageVector = if (isActiveAlbum && isPlaybackPlaying) {
@@ -155,6 +172,8 @@ fun AlbumScreen(
                                     "Play album"
                                 },
                             )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(if (isActiveAlbum && isPlaybackPlaying) "Pause" else "Play")
                         }
                         CircleIconButton(
                             imageVector = if (album?.savedByCurrentUser == true) {
@@ -172,10 +191,12 @@ fun AlbumScreen(
                             enabled = album != null,
                             activeContentColor = MaterialTheme.colorScheme.primary,
                         )
+                        Spacer(modifier = Modifier.weight(1f))
                         CollectionDownloadControls(
                             downloadState = albumDownloadState,
-                            progressPercent = null,
+                            progressPercent = albumDownloadProgressPercent,
                             isPaused = album?.id?.let(::isAlbumDownloadPaused) == true,
+                            isActive = isDownloadActive,
                             enabled = album != null && canDownload,
                             downloadContentDescription = "Download album",
                             deleteContentDescription = "Delete album download",

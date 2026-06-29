@@ -58,7 +58,6 @@ internal fun loadPlaylistTracksAction(
                 currentPlaylist.trackIds.any { it !in loadedTrackIds }
             if (playlist.isFavoritesPlaylist()) {
                 musicRepository.favoritesPlaylistPayloadTrackPage(
-                    playlist = currentPlaylist,
                     trackLimit = DETAIL_TRACK_PAGE_LIMIT,
                     trackOffset = if (shouldReloadFromStart) 0 else offset,
                 )

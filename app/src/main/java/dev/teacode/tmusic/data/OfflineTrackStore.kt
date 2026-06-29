@@ -110,6 +110,15 @@ class OfflineTrackStore(context: Context) {
             .sumOf { it.length() }
     }
 
+    suspend fun cacheSizeBytesExcluding(retainedTrackIds: Set<String>): Long = withContext(Dispatchers.IO) {
+        val retainedFileNames = retainedTrackIds
+            .map { trackId -> "${trackId.safeFileName()}.bin" }
+            .toSet()
+        cacheDirectory.walkTopDown()
+            .filter { file -> file.isFile && file.name !in retainedFileNames }
+            .sumOf { it.length() }
+    }
+
     suspend fun sizeBytes(): Long = withContext(Dispatchers.IO) {
         tracksDirectory.walkTopDown()
             .filter { it.isFile }

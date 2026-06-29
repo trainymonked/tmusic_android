@@ -1,7 +1,7 @@
 package dev.teacode.tmusic.ui
 
+import android.util.Log
 import dev.teacode.tmusic.data.LibraryCacheStore
-import dev.teacode.tmusic.data.PlaylistPayload
 import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.TMusicApiException
 import dev.teacode.tmusic.domain.DownloadState
@@ -27,7 +27,6 @@ internal fun toggleFavoriteTrackAction(
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
     mergePlaylistPickerMetadata: (List<Playlist>) -> Unit,
-    applyPlaylistPayload: (PlaylistPayload) -> Playlist?,
     updateKnownTrackLikedState: (String, Boolean) -> Unit,
     updateTrackDownloadState: (String, DownloadState) -> Unit,
     ensureTrackDownloaded: suspend (Track) -> Unit,
@@ -42,6 +41,7 @@ internal fun toggleFavoriteTrackAction(
     setLibraryError: (String?) -> Unit,
 ) {
     if (!canUseServerRequests()) {
+        Log.d(FAVORITE_TRACK_LOG_TAG, "toggle local-only track=${track.id}: server requests are unavailable")
         val favoritePlaylist = getPlaylists().favoritePlaylistForLocalMutation()
         val wasFavorite = currentFavoriteState(
             track = track,
@@ -49,17 +49,17 @@ internal fun toggleFavoriteTrackAction(
             tracks = getTracks(),
         )
         val nextPlaylist = if (wasFavorite) {
-            favoritePlaylist.withoutFavoriteTrack(track.id)
+            favoritePlaylist.withoutFavoriteTrack(track)
         } else {
-            favoritePlaylist.withFavoriteTrack(track.id)
+            favoritePlaylist.withFavoriteTrack(track)
         }
         val nextPlaylists = getPlaylists()
             .sanitizeClientPlaylists()
             .updateOrAppendPlaylist(nextPlaylist)
         setPlaylists(nextPlaylists)
         updateKnownTrackLikedState(track.id, !wasFavorite)
-        if (getTracks().none { it.id == track.id }) {
-            setTracks(getTracks() + track.copy(isLiked = !wasFavorite))
+        if (!wasFavorite && getTracks().none { it.id == track.id }) {
+            setTracks(listOf(track.copy(isLiked = true)) + getTracks())
         }
         enqueueLibraryMutation(
             "favorite.set",
@@ -80,18 +80,23 @@ internal fun toggleFavoriteTrackAction(
         tracks = previousTracks,
     )
     val shouldBeFavorite = !wasFavorite
+    if (track.id in getFavoriteSyncTrackIds()) {
+        Log.d(FAVORITE_TRACK_LOG_TAG, "skip toggle track=${track.id}: favorite sync is already running")
+        return
+    }
+    setFavoriteSyncTrackIds(getFavoriteSyncTrackIds() + track.id)
     val optimisticPlaylist = if (wasFavorite) {
-        localFavoritePlaylist.withoutFavoriteTrack(track.id)
+        localFavoritePlaylist.withoutFavoriteTrack(track)
     } else {
-        localFavoritePlaylist.withFavoriteTrack(track.id)
+        localFavoritePlaylist.withFavoriteTrack(track)
     }
     val optimisticPlaylists = previousPlaylists
         .sanitizeClientPlaylists()
         .updateOrAppendPlaylist(optimisticPlaylist)
     setPlaylists(optimisticPlaylists)
     updateKnownTrackLikedState(track.id, !wasFavorite)
-    if (previousTracks.none { it.id == track.id }) {
-        setTracks(previousTracks + track.copy(isLiked = !wasFavorite))
+    if (!wasFavorite && previousTracks.none { it.id == track.id }) {
+        setTracks(listOf(track.copy(isLiked = true)) + getTracks())
     }
     loadArtwork(track.id, ArtworkImageSize.AlbumGrid)
     libraryCacheStore.saveLibrary(
@@ -120,58 +125,52 @@ internal fun toggleFavoriteTrackAction(
         }
     }
 
-    if (track.id in getFavoriteSyncTrackIds()) {
-        return
-    }
-    setFavoriteSyncTrackIds(getFavoriteSyncTrackIds() + track.id)
     scope.launch {
         try {
-            var syncedState: Boolean? = null
-            while (true) {
-                val desiredFavoriteState = currentFavoriteState(track, getPlaylists(), getTracks())
-                if (desiredFavoriteState == syncedState) {
-                    break
+            Log.d(FAVORITE_TRACK_LOG_TAG, "sync favorite track=${track.id} liked=$shouldBeFavorite")
+            setLibraryError(null)
+            runCatching {
+                syncFavoriteTrackState(
+                    track = track,
+                    shouldBeFavorite = shouldBeFavorite,
+                    favoritePlaylistSnapshot = localFavoritePlaylist,
+                    getPlaylists = getPlaylists,
+                    musicRepository = musicRepository,
+                    mergePlaylistPickerMetadata = mergePlaylistPickerMetadata,
+                )
+            }.onSuccess { updatedPlaylist ->
+                setAccessToken(refreshAccessToken())
+                val nextPlaylists = getPlaylists()
+                    .sanitizeClientPlaylists()
+                    .updateOrAppendPlaylist(updatedPlaylist)
+                setPlaylists(nextPlaylists)
+                updateKnownTrackLikedState(track.id, track.id in updatedPlaylist.trackIds)
+                libraryCacheStore.saveLibrary(
+                    playlists = nextPlaylists,
+                    tracks = getTracks(),
+                    savedAlbums = getSavedAlbums(),
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) {
+                    throw error
                 }
-                setLibraryError(null)
-                runCatching {
-                    syncFavoriteTrackState(
-                        track = track,
-                        shouldBeFavorite = desiredFavoriteState,
-                        getPlaylists = getPlaylists,
-                        musicRepository = musicRepository,
-                        mergePlaylistPickerMetadata = mergePlaylistPickerMetadata,
-                        applyPlaylistPayload = applyPlaylistPayload,
-                    )
-                }.onSuccess { updatedPlaylist ->
-                    setAccessToken(refreshAccessToken())
-                    syncedState = desiredFavoriteState
-                    if (currentFavoriteState(track, getPlaylists(), getTracks()) == desiredFavoriteState) {
-                        val nextPlaylists = getPlaylists()
-                            .sanitizeClientPlaylists()
-                            .updateOrAppendPlaylist(updatedPlaylist)
-                        setPlaylists(nextPlaylists)
-                        updateKnownTrackLikedState(track.id, track.id in updatedPlaylist.trackIds)
-                        libraryCacheStore.saveLibrary(
-                            playlists = nextPlaylists,
-                            tracks = getTracks(),
-                            savedAlbums = getSavedAlbums(),
-                        )
+                val previousFavoritePlaylist = previousPlaylists.firstOrNull { it.isFavoritesPlaylist() }
+                val rollbackPlaylists = previousFavoritePlaylist
+                    ?.let { playlist -> getPlaylists().sanitizeClientPlaylists().updateOrAppendPlaylist(playlist) }
+                    ?: getPlaylists().sanitizeClientPlaylists().filterNot { it.isFavoritesPlaylist() }
+                val previousTrack = previousTracks.firstOrNull { it.id == track.id }
+                val rollbackTracks = if (previousTrack == null) {
+                    getTracks().filterNot { it.id == track.id }
+                } else {
+                    getTracks().map { currentTrack ->
+                        if (currentTrack.id == track.id) previousTrack else currentTrack
                     }
-                }.onFailure { error ->
-                    if (error is CancellationException) {
-                        throw error
-                    }
-                    if (currentFavoriteState(track, getPlaylists(), getTracks()) == desiredFavoriteState) {
-                        setPlaylists(previousPlaylists)
-                        setTracks(previousTracks)
-                    }
-                    markServerUnavailable(error)
-                    setLibraryError(error.userMessage())
-                    break
                 }
-                if (currentFavoriteState(track, getPlaylists(), getTracks()) == syncedState) {
-                    break
-                }
+                setPlaylists(rollbackPlaylists)
+                setTracks(rollbackTracks)
+                updateKnownTrackLikedState(track.id, wasFavorite)
+                markServerUnavailable(error)
+                setLibraryError(error.userMessage())
             }
         } finally {
             setFavoriteSyncTrackIds(getFavoriteSyncTrackIds() - track.id)
@@ -184,13 +183,16 @@ private fun currentFavoriteState(
     playlists: List<Playlist>,
     tracks: List<Track>,
 ): Boolean {
+    val favoritePlaylist = playlists.firstOrNull { it.isFavoritesPlaylist() }
     val knownTrackState = tracks.firstOrNull { it.id == track.id }?.isLiked
+    if (knownTrackState == false || track.isLiked == false) {
+        return false
+    }
+    if (favoritePlaylist != null && track.id in favoritePlaylist.trackIds) {
+        return true
+    }
     if (knownTrackState != null) {
         return knownTrackState
-    }
-    val favoritePlaylist = playlists.firstOrNull { it.isFavoritesPlaylist() }
-    if (favoritePlaylist != null) {
-        return track.id in favoritePlaylist.trackIds
     }
     return track.isLiked == true
 }
@@ -198,43 +200,63 @@ private fun currentFavoriteState(
 private suspend fun syncFavoriteTrackState(
     track: Track,
     shouldBeFavorite: Boolean,
+    favoritePlaylistSnapshot: Playlist,
     getPlaylists: () -> List<Playlist>,
     musicRepository: RemoteMusicRepository,
     mergePlaylistPickerMetadata: (List<Playlist>) -> Unit,
-    applyPlaylistPayload: (PlaylistPayload) -> Playlist?,
 ): Playlist {
-    var favoritePlaylist = loadFavoritesPlaylistForTrackAction(
-        track = track,
-        getPlaylists = getPlaylists,
-        musicRepository = musicRepository,
-        mergePlaylistPickerMetadata = mergePlaylistPickerMetadata,
-        applyPlaylistPayload = applyPlaylistPayload,
-    ) ?: throw IllegalStateException("Favorites playlist was not found.")
-    val serverOptimisticPlaylist = if (shouldBeFavorite) {
-        favoritePlaylist.withFavoriteTrack(track.id)
+    val favoriteMetadata = if (favoritePlaylistSnapshot.id != "favorites") {
+        favoritePlaylistSnapshot
     } else {
-        favoritePlaylist.withoutFavoriteTrack(track.id)
+        findOrLoadFavoritesPlaylistAction(
+            getPlaylists = getPlaylists,
+            musicRepository = musicRepository,
+            mergePlaylistPickerMetadata = mergePlaylistPickerMetadata,
+        ) ?: throw IllegalStateException("Favorites playlist was not found.")
+    }
+    var favoritePlaylist = favoritePlaylistSnapshot.copy(
+        id = favoriteMetadata.id,
+        title = favoriteMetadata.title,
+        isOfflineEnabled = favoriteMetadata.isOfflineEnabled,
+        isPublic = favoriteMetadata.isPublic,
+        isFavorites = true,
+        trackCount = favoritePlaylistSnapshot.trackCount.coerceAtLeast(favoritePlaylistSnapshot.trackIds.size),
+        totalDurationSeconds = favoriteMetadata.totalDurationSeconds,
+        updatedAt = favoriteMetadata.updatedAt,
+    )
+    val serverOptimisticPlaylist = if (shouldBeFavorite) {
+        favoritePlaylist.withFavoriteTrack(track)
+    } else {
+        favoritePlaylist.withoutFavoriteTrack(track)
     }
     if (shouldBeFavorite) {
-        if (track.id in favoritePlaylist.trackIds) {
-            return serverOptimisticPlaylist
-        }
         val serverPlaylist = musicRepository.addTrackToPlaylist(
             playlistId = favoritePlaylist.id,
             trackId = track.id,
         )
         return serverPlaylist.normalizedFavoriteResponse(
             localState = serverOptimisticPlaylist,
-            trackId = track.id,
+            track = track,
             shouldContain = true,
         )
     }
 
-    favoritePlaylist = applyPlaylistPayload(
-        musicRepository.favoritesPlaylistPayload(favoritePlaylist),
-    ) ?: favoritePlaylist
-    val playlistTrackIds = favoritePlaylist.playlistTrackIdsForTrack(track.id)
+    var playlistTrackIds = favoritePlaylistSnapshot.playlistTrackIdsForTrack(track.id)
     if (playlistTrackIds.isEmpty()) {
+        favoritePlaylist = musicRepository.favoritesPlaylistPayload()
+            .playlists
+            .firstOrNull()
+            ?: favoritePlaylist
+        playlistTrackIds = favoritePlaylist.playlistTrackIdsForTrack(track.id)
+    }
+    if (playlistTrackIds.isEmpty()) {
+        Log.d(
+            FAVORITE_TRACK_LOG_TAG,
+            "Favorite track ${track.id} is already absent on server playlist ${favoritePlaylist.id}; " +
+                "no playlistTrackId returned after full payload load. " +
+                "trackIds=${favoritePlaylist.trackIds.size} playlistTrackIds=${favoritePlaylist.playlistTrackIds.size} " +
+                "playlistTrackIdsByTrackId=${favoritePlaylist.playlistTrackIdsByTrackId.size}",
+        )
         return serverOptimisticPlaylist
     }
     var nextPlaylist = serverOptimisticPlaylist
@@ -245,12 +267,12 @@ private suspend fun syncFavoriteTrackState(
                 playlistTrackId = playlistTrackId,
             ).normalizedFavoriteResponse(
                 localState = nextPlaylist,
-                trackId = track.id,
+                track = track,
                 shouldContain = false,
             )
         } catch (error: TMusicApiException) {
             if (error.isNotFound()) {
-                nextPlaylist.withoutFavoriteTrack(track.id)
+                nextPlaylist.withoutFavoriteTrack(track)
             } else {
                 throw error
             }
@@ -263,35 +285,16 @@ private fun TMusicApiException.isNotFound(): Boolean {
     return statusCode == 404 || message?.contains("not found", ignoreCase = true) == true
 }
 
-internal suspend fun loadFavoritesPlaylistForTrackAction(
-    track: Track,
-    getPlaylists: () -> List<Playlist>,
-    musicRepository: RemoteMusicRepository,
-    mergePlaylistPickerMetadata: (List<Playlist>) -> Unit,
-    applyPlaylistPayload: (PlaylistPayload) -> Playlist?,
-): Playlist? {
-    val favoritePlaylist = findOrLoadFavoritesPlaylistAction(
-        getPlaylists = getPlaylists,
-        musicRepository = musicRepository,
-        mergePlaylistPickerMetadata = mergePlaylistPickerMetadata,
-    ) ?: return null
-    val cachedHasTrack = track.id in favoritePlaylist.trackIds
-    val cachedPlaylistTrackIds = favoritePlaylist.playlistTrackIdsForTrack(track.id)
-    val cacheCoversPlaylist = favoritePlaylist.trackCount <= 0 ||
-        favoritePlaylist.trackIds.size >= favoritePlaylist.trackCount
-    if ((cachedHasTrack && cachedPlaylistTrackIds.isNotEmpty()) || (!cachedHasTrack && cacheCoversPlaylist)) {
-        return favoritePlaylist
-    }
-    val payload = musicRepository.favoritesPlaylistPayload(favoritePlaylist)
-    return applyPlaylistPayload(payload) ?: favoritePlaylist
-}
+private const val FAVORITE_TRACK_LOG_TAG = "TMusicFavorites"
 
 private suspend fun findOrLoadFavoritesPlaylistAction(
     getPlaylists: () -> List<Playlist>,
     musicRepository: RemoteMusicRepository,
     mergePlaylistPickerMetadata: (List<Playlist>) -> Unit,
 ): Playlist? {
-    getPlaylists().firstOrNull { it.isFavoritesPlaylist() }?.let { return it }
+    getPlaylists().firstOrNull { playlist ->
+        playlist.isFavoritesPlaylist() && playlist.id != "favorites"
+    }?.let { return it }
     val loadedPlaylists = musicRepository.playlistsMetadata()
     mergePlaylistPickerMetadata(loadedPlaylists)
     return loadedPlaylists.firstOrNull { it.isFavoritesPlaylist() }

@@ -2,38 +2,36 @@ package dev.teacode.tmusic.ui
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
+import android.graphics.Canvas as AndroidCanvas
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas as ComposeCanvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,13 +40,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -152,6 +153,7 @@ fun CollectionDownloadControls(
     downloadState: DownloadState,
     progressPercent: Int?,
     isPaused: Boolean = false,
+    isActive: Boolean = false,
     enabled: Boolean,
     downloadContentDescription: String,
     deleteContentDescription: String,
@@ -159,85 +161,277 @@ fun CollectionDownloadControls(
     onDeleteDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    var showRemoveDownloadDialog by remember { mutableStateOf(false) }
+    val isQueued = downloadState == DownloadState.Queued
+    val isError = isQueued && !isActive && !isPaused
+    val dialogTitle = if (downloadState == DownloadState.Downloaded) {
+        "Remove download?"
+    } else {
+        "Stop download?"
+    }
+    val dialogText = if (downloadState == DownloadState.Downloaded) {
+        "This removes the collection from downloads. Tracks still used by another downloaded playlist or album stay downloaded."
+    } else {
+        "This stops the current download and removes the collection from downloads. Tracks still used by another downloaded playlist or album stay downloaded."
+    }
+
+    CollectionDownloadButton(
+        downloadState = downloadState,
+        progressPercent = progressPercent,
+        isPaused = isPaused,
+        isActive = isActive,
+        isError = isError,
+        enabled = enabled,
+        contentDescription = when {
+            downloadState == DownloadState.Downloaded -> deleteContentDescription
+            isPaused -> "Resume download"
+            isActive -> "Pause download"
+            else -> downloadContentDescription
+        },
+        onClick = {
+            when (downloadState) {
+                DownloadState.Downloaded -> showRemoveDownloadDialog = true
+                DownloadState.Queued,
+                DownloadState.NotDownloaded,
+                -> onDownload()
+            }
+        },
+        onLongClick = if (isQueued || downloadState == DownloadState.Downloaded) {
+            { showRemoveDownloadDialog = true }
+        } else {
+            null
+        },
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        when (downloadState) {
-            DownloadState.NotDownloaded -> {
-                Button(
-                    onClick = onDownload,
-                    enabled = enabled,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.height(40.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Download,
-                        contentDescription = downloadContentDescription,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Download")
-                }
-            }
-            DownloadState.Queued -> {
-                val pauseResumeDescription = if (isPaused) {
-                    "Resume download"
-                } else {
-                    "Pause download"
-                }
-                OutlinedButton(
-                    onClick = onDownload,
-                    enabled = enabled,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.height(40.dp),
-                ) {
-                    Icon(
-                        imageVector = if (isPaused) Icons.Filled.Download else Icons.Filled.Pause,
-                        contentDescription = pauseResumeDescription,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (isPaused) "Resume" else "Pause")
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                CircleIconButton(
-                    imageVector = Icons.Filled.Delete,
-                    contentDescription = deleteContentDescription,
-                    active = false,
-                    onClick = onDeleteDownload,
-                    enabled = enabled,
-                    buttonSize = 40.dp,
-                    containerSize = 36.dp,
-                    iconModifier = Modifier.size(22.dp),
+        if (showRemoveDownloadDialog) {
+            AlertDialog(
+                onDismissRequest = { showRemoveDownloadDialog = false },
+                title = { Text(dialogTitle) },
+                text = { Text(dialogText) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showRemoveDownloadDialog = false
+                            onDeleteDownload()
+                        },
+                    ) {
+                        Text("Remove")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRemoveDownloadDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CollectionDownloadButton(
+    downloadState: DownloadState,
+    progressPercent: Int?,
+    isPaused: Boolean,
+    isActive: Boolean,
+    isError: Boolean,
+    enabled: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val transition = rememberInfiniteTransition(label = "collection-download-button")
+    val activeArrowProgress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_050, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "collection-download-arrow-progress",
+    )
+    val progress = when (downloadState) {
+        DownloadState.Downloaded -> 1f
+        DownloadState.Queued -> (progressPercent ?: 0).coerceIn(0, 100) / 100f
+        DownloadState.NotDownloaded -> 0f
+    }
+    val showRing = downloadState != DownloadState.NotDownloaded
+    val ringColor = when {
+        isError -> MaterialTheme.colorScheme.error
+        downloadState == DownloadState.Downloaded -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+    val ringTrackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.46f)
+    val iconColor = if (enabled) {
+        when {
+            isError -> MaterialTheme.colorScheme.error
+            downloadState == DownloadState.Downloaded -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .combinedClickable(
+                enabled = enabled,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (showRing) {
+            ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 2.25.dp.toPx()
+                val inset = strokeWidth / 2f
+                val arcSize = Size(
+                    width = size.width - strokeWidth,
+                    height = size.height - strokeWidth,
                 )
-            }
-            DownloadState.Downloaded -> {
-                OutlinedButton(
-                    onClick = onDeleteDownload,
-                    enabled = enabled,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.height(40.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Delete,
-                        contentDescription = deleteContentDescription,
-                        modifier = Modifier.size(18.dp),
+                drawCircle(
+                    color = ringTrackColor,
+                    radius = (size.minDimension - strokeWidth) / 2f,
+                    style = Stroke(width = strokeWidth),
+                )
+                if (progress > 0f || downloadState == DownloadState.Downloaded) {
+                    drawArc(
+                        color = ringColor,
+                        startAngle = -90f,
+                        sweepAngle = 360f * progress.coerceIn(0f, 1f),
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Delete")
                 }
             }
         }
-        progressPercent?.let { percent ->
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "$percent%",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        DownloadGlyph(
+            contentDescription = contentDescription,
+            color = iconColor,
+            arrowProgress = if (isActive && !isPaused) activeArrowProgress else 0f,
+            animateArrow = isActive && !isPaused,
+            modifier = Modifier.size(25.dp),
+        )
+        when {
+            downloadState == DownloadState.Downloaded -> DownloadStateBadge(
+                imageVector = Icons.Filled.CheckCircle,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+            isPaused -> DownloadStateBadge(
+                imageVector = Icons.Filled.PlayArrow,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+            isError -> DownloadStateBadge(
+                imageVector = Icons.Filled.Close,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+private fun DownloadGlyph(
+    contentDescription: String,
+    color: Color,
+    arrowProgress: Float,
+    animateArrow: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        ComposeCanvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 2.35.dp.toPx()
+            val centerX = size.width / 2f
+            val trayY = size.height * 0.82f
+            val trayHalfWidth = size.width * 0.32f
+            val safeProgress = arrowProgress.coerceIn(0f, 1f)
+            val travelY = if (animateArrow) {
+                (-size.height * 0.22f) + (size.height * 0.52f * safeProgress)
+            } else {
+                0f
+            }
+            val arrowAlpha = if (!animateArrow) {
+                1f
+            } else {
+                when {
+                    safeProgress < 0.12f -> (safeProgress / 0.12f).coerceIn(0f, 1f)
+                    safeProgress > 0.68f -> ((1f - safeProgress) / 0.32f).coerceIn(0f, 1f)
+                    else -> 1f
+                }
+            }
+            val arrowColor = color.copy(alpha = color.alpha * arrowAlpha)
+            val arrowTopY = size.height * 0.18f + travelY
+            val arrowBottomY = (size.height * 0.58f + travelY).coerceAtMost(trayY - strokeWidth * 0.55f)
+            val headHalfWidth = size.width * 0.20f
+            val headTopY = (size.height * 0.44f + travelY).coerceAtMost(trayY - strokeWidth * 1.2f)
+            drawLine(
+                color = color,
+                start = Offset(centerX - trayHalfWidth, trayY),
+                end = Offset(centerX + trayHalfWidth, trayY),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = arrowColor,
+                start = Offset(centerX, arrowTopY),
+                end = Offset(centerX, arrowBottomY),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = arrowColor,
+                start = Offset(centerX, arrowBottomY),
+                end = Offset(centerX - headHalfWidth, headTopY),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = arrowColor,
+                start = Offset(centerX, arrowBottomY),
+                end = Offset(centerX + headHalfWidth, headTopY),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+        Icon(
+            imageVector = Icons.Filled.Download,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(1.dp),
+            tint = Color.Transparent,
+        )
+    }
+}
+
+@Composable
+private fun DownloadStateBadge(
+    imageVector: ImageVector,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.size(16.dp),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = tint,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = imageVector,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
             )
         }
     }
@@ -288,7 +482,7 @@ fun Context.drawableResourceBitmap(resourceId: Int): ImageBitmap? {
     val width = drawable.intrinsicWidth.takeIf { it > 0 } ?: 512
     val height = drawable.intrinsicHeight.takeIf { it > 0 } ?: 512
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
+    val canvas = AndroidCanvas(bitmap)
     drawable.setBounds(0, 0, canvas.width, canvas.height)
     drawable.draw(canvas)
     return bitmap.asImageBitmap()

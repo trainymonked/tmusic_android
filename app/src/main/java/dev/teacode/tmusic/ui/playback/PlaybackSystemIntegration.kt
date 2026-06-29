@@ -121,7 +121,7 @@ private fun android.content.Context.updatePlaybackService(
     canSkip: Boolean,
 ) {
     val currentTrack = state.currentTrack
-    if (currentTrack == null || state.streamUrl == null) {
+    if (currentTrack == null) {
         stopService(Intent(this, PlaybackForegroundService::class.java))
         return
     }

@@ -50,27 +50,19 @@ internal fun PlaylistPayload.mergePlaylistTrackPage(
     append: Boolean,
 ): PlaylistPayload {
     val pagePlaylist = playlists.firstOrNull() ?: return this
-    val shouldKeepKnownOfflineTrackOrder = !append &&
-        currentPlaylist.isOfflineEnabled &&
-        currentPlaylist.trackIds.size > pagePlaylist.trackIds.size
     val mergedPlaylist = when {
         append -> pagePlaylist.copy(
             trackIds = currentPlaylist.trackIds + pagePlaylist.trackIds,
             playlistTrackIds = currentPlaylist.playlistTrackIds + pagePlaylist.playlistTrackIds,
             playlistTrackIdsByTrackId = currentPlaylist.playlistTrackIdsByTrackId + pagePlaylist.playlistTrackIdsByTrackId,
-            trackCount = maxOf(currentPlaylist.trackCount, pagePlaylist.trackCount),
-            totalDurationSeconds = pagePlaylist.totalDurationSeconds ?: currentPlaylist.totalDurationSeconds,
-        )
-
-        shouldKeepKnownOfflineTrackOrder -> pagePlaylist.copy(
-            trackIds = currentPlaylist.trackIds,
-            playlistTrackIds = currentPlaylist.playlistTrackIds,
-            playlistTrackIdsByTrackId = currentPlaylist.playlistTrackIdsByTrackId,
-            trackCount = maxOf(currentPlaylist.trackCount, pagePlaylist.trackCount, currentPlaylist.trackIds.size),
+            trackCount = pagePlaylist.trackCount.coerceAtLeast(
+                currentPlaylist.trackIds.size + pagePlaylist.trackIds.size,
+            ),
             totalDurationSeconds = pagePlaylist.totalDurationSeconds ?: currentPlaylist.totalDurationSeconds,
         )
 
         else -> pagePlaylist.copy(
+            trackCount = pagePlaylist.trackCount.coerceAtLeast(pagePlaylist.trackIds.size),
             totalDurationSeconds = pagePlaylist.totalDurationSeconds ?: currentPlaylist.totalDurationSeconds,
         )
     }

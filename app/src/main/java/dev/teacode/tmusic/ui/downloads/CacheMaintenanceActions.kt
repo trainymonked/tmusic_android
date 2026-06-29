@@ -42,9 +42,13 @@ internal fun clearAppCacheAction(
 ) {
     scope.launch {
         val downloadedTracks = getTracks().filter { track -> track.downloadState == DownloadState.Downloaded }
-        val downloadedTrackIds = downloadedTracks.map { it.id }.toSet()
-        val offlinePlaylists = getPlaylists().filter { playlist -> playlist.trackIds.any { it in downloadedTrackIds } }
-        val retainedArtworkKeys = downloadedArtworkKeys(getPlaylists(), downloadedTracks)
+        val currentPlaylists = getPlaylists()
+        val offlinePlaylists = currentPlaylists.filter { playlist -> playlist.isOfflineEnabled }
+        val retainedPlaylists = (
+            offlinePlaylists + currentPlaylists.filter { playlist -> playlist.isFavoritesPlaylist() }
+        ).distinctBy { playlist -> playlist.id }
+        val offlineSavedAlbums = getSavedAlbums().filter { album -> album.isOfflineEnabled }
+        val retainedArtworkKeys = downloadedArtworkKeys(offlinePlaylists, downloadedTracks)
         val retainedArtworkCacheKeys = artworkCacheKeysFor(retainedArtworkKeys)
         artworkCacheStore.clearExcept(retainedArtworkCacheKeys)
         if (retainedTrackIds.isEmpty()) {
@@ -59,11 +63,11 @@ internal fun clearAppCacheAction(
         }
         appCacheStore.clearAndroidCache(excludedCacheDirNames = setOf(playbackCacheDirName))
         libraryCacheStore.clear()
-        if (downloadedTracks.isNotEmpty()) {
+        if (retainedPlaylists.isNotEmpty() || downloadedTracks.isNotEmpty() || offlineSavedAlbums.isNotEmpty()) {
             libraryCacheStore.saveLibrary(
-                playlists = offlinePlaylists,
+                playlists = retainedPlaylists,
                 tracks = downloadedTracks,
-                savedAlbums = getSavedAlbums(),
+                savedAlbums = offlineSavedAlbums,
             )
         }
         playbackStateStore.clear()

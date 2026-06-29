@@ -1,0 +1,162 @@
+package dev.teacode.tmusic.ui
+
+import dev.teacode.tmusic.data.LibraryCacheStore
+import dev.teacode.tmusic.data.PlaylistPayload
+import dev.teacode.tmusic.data.RemoteAuthRepository
+import dev.teacode.tmusic.data.RemoteMusicRepository
+import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.DownloadState
+import dev.teacode.tmusic.domain.LibraryAlbum
+import dev.teacode.tmusic.domain.Playlist
+import dev.teacode.tmusic.domain.Track
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+
+internal class DownloadActionHost(
+    private val scope: CoroutineScope,
+    private val canUseMediaServerRequests: () -> Boolean,
+    private val isOfflineOnly: () -> Boolean,
+    private val getSyncMode: () -> SyncMode,
+    private val getAccount: () -> Account?,
+    private val musicRepository: RemoteMusicRepository,
+    private val authRepository: RemoteAuthRepository,
+    private val libraryCacheStore: LibraryCacheStore,
+    private val getPlaylists: () -> List<Playlist>,
+    private val setPlaylists: (List<Playlist>) -> Unit,
+    private val getTracks: () -> List<Track>,
+    private val setTracks: (List<Track>) -> Unit,
+    private val getSavedAlbums: () -> List<LibraryAlbum>,
+    private val setSavedAlbums: (List<LibraryAlbum>) -> Unit,
+    private val mediaDisabledMessage: () -> String,
+    private val updateTrackDownloadState: (String, DownloadState) -> Unit,
+    private val ensureTrackDownloaded: suspend (Track) -> Unit,
+    private val cacheDownloadedAssets: suspend (Track) -> Unit,
+    private val disableMediaPlaybackForAccount: () -> Unit,
+    private val setAccessToken: (String?) -> Unit,
+    private val setLibraryError: (String?) -> Unit,
+    private val refreshStorageStats: () -> Unit,
+    private val getPlaylistDownloadJobs: () -> Map<String, Job>,
+    private val setPlaylistDownloadJobs: (Map<String, Job>) -> Unit,
+    private val pausePlaylistDownload: (Playlist) -> Unit,
+    private val canUseNetworkForCollectionDownloads: () -> Boolean,
+    private val applyPlaylistTrackPage: (Playlist, PlaylistPayload, Boolean) -> Playlist?,
+    private val markServerUnavailable: (Throwable) -> Unit,
+    private val requestEnableCellularDownloads: () -> Unit,
+    private val getAlbumDownloadJobs: () -> Map<String, Job>,
+    private val setAlbumDownloadJobs: (Map<String, Job>) -> Unit,
+    private val pauseAlbumDownload: (LibraryAlbum, List<Track>) -> Unit,
+    private val getAlbums: () -> List<LibraryAlbum>,
+    private val setAlbums: (List<LibraryAlbum>) -> Unit,
+    private val getAlbumsByArtist: () -> Map<String, List<LibraryAlbum>>,
+    private val setAlbumsByArtist: (Map<String, List<LibraryAlbum>>) -> Unit,
+    private val getAppearsOnByArtist: () -> Map<String, List<LibraryAlbum>>,
+    private val setAppearsOnByArtist: (Map<String, List<LibraryAlbum>>) -> Unit,
+    private val getAlbumTracksById: () -> Map<String, List<Track>>,
+    private val setAlbumTracksById: (Map<String, List<Track>>) -> Unit,
+    private val mergeLoadedTracks: (List<Track>) -> Unit,
+    private val updateAlbumOfflineFlag: (String, Boolean) -> Unit,
+) {
+    fun downloadTrack(track: Track) {
+        downloadTrackAction(
+            scope = scope,
+            track = track,
+            canUseMediaServerRequests = canUseMediaServerRequests,
+            isOfflineOnly = isOfflineOnly,
+            getSyncMode = getSyncMode,
+            getAccount = getAccount,
+            musicRepository = musicRepository,
+            authRepository = authRepository,
+            libraryCacheStore = libraryCacheStore,
+            getPlaylists = getPlaylists,
+            getTracks = getTracks,
+            setTracks = setTracks,
+            getSavedAlbums = getSavedAlbums,
+            mediaDisabledMessage = mediaDisabledMessage,
+            updateTrackDownloadState = updateTrackDownloadState,
+            ensureTrackDownloaded = ensureTrackDownloaded,
+            cacheDownloadedAssets = cacheDownloadedAssets,
+            disableMediaPlaybackForAccount = disableMediaPlaybackForAccount,
+            setAccessToken = setAccessToken,
+            setLibraryError = setLibraryError,
+            refreshStorageStats = refreshStorageStats,
+        )
+    }
+
+    fun downloadPlaylist(playlist: Playlist) {
+        downloadPlaylistAction(
+            scope = scope,
+            playlist = playlist,
+            getPlaylistDownloadJobs = getPlaylistDownloadJobs,
+            setPlaylistDownloadJobs = setPlaylistDownloadJobs,
+            pausePlaylistDownload = pausePlaylistDownload,
+            canUseNetworkForCollectionDownloads = canUseNetworkForCollectionDownloads,
+            isOfflineOnly = isOfflineOnly,
+            getSyncMode = getSyncMode,
+            canUseMediaServerRequests = canUseMediaServerRequests,
+            getAccount = getAccount,
+            mediaDisabledMessage = mediaDisabledMessage,
+            getPlaylists = getPlaylists,
+            setPlaylists = setPlaylists,
+            getTracks = getTracks,
+            setTracks = setTracks,
+            getSavedAlbums = getSavedAlbums,
+            musicRepository = musicRepository,
+            libraryCacheStore = libraryCacheStore,
+            applyPlaylistTrackPage = applyPlaylistTrackPage,
+            markServerUnavailable = markServerUnavailable,
+            updateTrackDownloadState = updateTrackDownloadState,
+            ensureTrackDownloaded = ensureTrackDownloaded,
+            cacheDownloadedAssets = cacheDownloadedAssets,
+            disableMediaPlaybackForAccount = disableMediaPlaybackForAccount,
+            refreshAccessToken = authRepository::accessToken,
+            setAccessToken = setAccessToken,
+            setLibraryError = setLibraryError,
+            requestEnableCellularDownloads = requestEnableCellularDownloads,
+            refreshStorageStats = refreshStorageStats,
+        )
+    }
+
+    fun downloadAlbum(album: LibraryAlbum, albumTracks: List<Track>) {
+        downloadAlbumAction(
+            scope = scope,
+            album = album,
+            albumTracks = albumTracks,
+            getAlbumDownloadJobs = getAlbumDownloadJobs,
+            setAlbumDownloadJobs = setAlbumDownloadJobs,
+            pauseAlbumDownload = pauseAlbumDownload,
+            canUseNetworkForCollectionDownloads = canUseNetworkForCollectionDownloads,
+            isOfflineOnly = isOfflineOnly,
+            getSyncMode = getSyncMode,
+            canUseMediaServerRequests = canUseMediaServerRequests,
+            getAccount = getAccount,
+            mediaDisabledMessage = mediaDisabledMessage,
+            getTracks = getTracks,
+            setTracks = setTracks,
+            getPlaylists = getPlaylists,
+            getSavedAlbums = getSavedAlbums,
+            setSavedAlbums = setSavedAlbums,
+            getAlbums = getAlbums,
+            setAlbums = setAlbums,
+            getAlbumsByArtist = getAlbumsByArtist,
+            setAlbumsByArtist = setAlbumsByArtist,
+            getAppearsOnByArtist = getAppearsOnByArtist,
+            setAppearsOnByArtist = setAppearsOnByArtist,
+            getAlbumTracksById = getAlbumTracksById,
+            setAlbumTracksById = setAlbumTracksById,
+            musicRepository = musicRepository,
+            libraryCacheStore = libraryCacheStore,
+            markServerUnavailable = markServerUnavailable,
+            mergeLoadedTracks = mergeLoadedTracks,
+            updateAlbumOfflineFlag = updateAlbumOfflineFlag,
+            updateTrackDownloadState = updateTrackDownloadState,
+            ensureTrackDownloaded = ensureTrackDownloaded,
+            cacheDownloadedAssets = cacheDownloadedAssets,
+            disableMediaPlaybackForAccount = disableMediaPlaybackForAccount,
+            refreshAccessToken = authRepository::accessToken,
+            setAccessToken = setAccessToken,
+            setLibraryError = setLibraryError,
+            requestEnableCellularDownloads = requestEnableCellularDownloads,
+            refreshStorageStats = refreshStorageStats,
+        )
+    }
+}

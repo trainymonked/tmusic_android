@@ -34,9 +34,7 @@ internal fun LoadedLibraryState.mergeWithCachedLibrary(
     val nextPlaylists = playlists?.let(cachedPlaylists::mergeLoadedPlaylists) ?: cachedPlaylists
     val nextTracks = tracks?.let(cachedTracks::mergeLoadedTracks) ?: cachedTracks
     val nextRecentAlbums = recentAlbums ?: cachedRecentAlbums
-    val nextArtists = artists
-        ?.sortedArtistsForDisplay()
-        ?: cachedArtists
+    val nextArtists = artists ?: cachedArtists
     val nextAlbums = albums
         ?.map { album ->
             val existingAlbum = cachedAlbums.firstOrNull { it.id == album.id }

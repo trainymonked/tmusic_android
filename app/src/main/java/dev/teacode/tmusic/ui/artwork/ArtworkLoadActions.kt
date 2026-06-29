@@ -17,7 +17,9 @@ internal suspend fun cachedArtworkBitmapAction(
     imageSize: ArtworkImageSize,
     artworkCacheStore: ArtworkCacheStore,
 ): ImageBitmap? {
-    val cachedPath = artworkCacheStore.cachedPath(artworkCacheKey(artworkKey, imageSize)) ?: return null
+    val cachedPath = artworkCacheStore.cachedPath(artworkCacheKey(artworkKey, imageSize))
+        ?: artworkCacheStore.cachedPath(legacyArtworkCacheKey(artworkKey, imageSize))
+        ?: return null
     return decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
 }
 
@@ -40,31 +42,33 @@ internal suspend fun cacheArtworkAction(
 ): ImageBitmap? {
     cachedArtworkBitmapAction(artworkKey, imageSize, artworkCacheStore)?.let { return it }
     val cacheKey = artworkCacheKey(artworkKey, imageSize)
-    val cachedPath = artworkCacheStore.cachedPath(cacheKey) ?: run {
-        if (!canUseMediaServerRequests()) {
-            return null
-        }
-
-        val url = when {
-            artworkKey.startsWith(ALBUM_ARTWORK_KEY_PREFIX) ->
-                musicRepository.albumArtworkUrl(artworkKey.albumIdFromArtworkKey())
-            artworkKey.startsWith(ARTIST_ARTWORK_KEY_PREFIX) -> {
-                val artistId = artworkKey.artistIdFromArtworkKey()
-                val knownArtistHasId = (
-                    getArtists() + getSearchResults().artists + getSimilarArtistsByArtist().values.flatten()
-                    ).any { it.id == artistId }
-                if (!knownArtistHasId) {
-                    return null
-                }
-                musicRepository.artistArtworkUrl(artistId, size = imageSize.maxSizePx)
+    val cachedPath = artworkCacheStore.cachedPath(cacheKey)
+        ?: artworkCacheStore.cachedPath(legacyArtworkCacheKey(artworkKey, imageSize))
+        ?: run {
+            if (!canUseMediaServerRequests()) {
+                return null
             }
-            artworkKey.startsWith(PLAYLIST_ARTWORK_KEY_PREFIX) ->
-                musicRepository.playlistArtworkUrl(artworkKey.playlistIdFromArtworkKey(), size = imageSize.maxSizePx)
-            else -> musicRepository.artworkUrl(artworkKey)
+
+            val url = when {
+                artworkKey.startsWith(ALBUM_ARTWORK_KEY_PREFIX) ->
+                    musicRepository.albumArtworkUrl(artworkKey.albumIdFromArtworkKey())
+                artworkKey.startsWith(ARTIST_ARTWORK_KEY_PREFIX) -> {
+                    val artistId = artworkKey.artistIdFromArtworkKey()
+                    val knownArtistHasId = (
+                        getArtists() + getSearchResults().artists + getSimilarArtistsByArtist().values.flatten()
+                        ).any { it.id == artistId }
+                    if (!knownArtistHasId) {
+                        return null
+                    }
+                    musicRepository.artistArtworkUrl(artistId, size = imageSize.maxSizePx)
+                }
+                artworkKey.startsWith(PLAYLIST_ARTWORK_KEY_PREFIX) ->
+                    musicRepository.playlistArtworkUrl(artworkKey.playlistIdFromArtworkKey(), size = imageSize.maxSizePx)
+                else -> musicRepository.artworkUrl(artworkKey)
+            }
+            setAccessToken(refreshAccessToken())
+            artworkCacheStore.cache(cacheKey, url)
         }
-        setAccessToken(refreshAccessToken())
-        artworkCacheStore.cache(cacheKey, url)
-    }
     val bitmap = decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
     val downloadedKeys = downloadedArtworkCacheKeys(getPlaylists(), getTracks())
     artworkCacheStore.trimToLimit(
@@ -89,11 +93,17 @@ internal fun loadArtworkAction(
     disableMediaPlaybackForAccount: () -> Unit,
 ) {
     val bitmapKey = artworkBitmapKey(artworkKey, imageSize)
-    if (getArtworkBitmaps().containsKey(bitmapKey) || bitmapKey in getArtworkLoadsInProgress()) {
+    val cacheKey = artworkCacheKey(artworkKey, imageSize)
+    val loadsInProgress = getArtworkLoadsInProgress()
+    if (
+        getArtworkBitmaps().containsKey(bitmapKey) ||
+        bitmapKey in loadsInProgress ||
+        cacheKey in loadsInProgress
+    ) {
         return
     }
 
-    setArtworkLoadsInProgress(getArtworkLoadsInProgress() + bitmapKey)
+    setArtworkLoadsInProgress(getArtworkLoadsInProgress() + bitmapKey + cacheKey)
     scope.launch {
         runCatching {
             cacheArtwork(artworkKey, imageSize)
@@ -106,7 +116,7 @@ internal fun loadArtworkAction(
                 disableMediaPlaybackForAccount()
             }
         }
-        setArtworkLoadsInProgress(getArtworkLoadsInProgress() - bitmapKey)
+        setArtworkLoadsInProgress(getArtworkLoadsInProgress() - bitmapKey - cacheKey)
     }
 }
 

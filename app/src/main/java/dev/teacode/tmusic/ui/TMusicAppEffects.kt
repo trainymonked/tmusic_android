@@ -347,18 +347,9 @@ internal fun PlaylistSyncEffects(
     offlineOnly: Boolean,
     syncMode: SyncMode,
     pendingLibraryMutationCount: Int,
-    playlists: List<Playlist>,
-    currentTrack: Track?,
     canUseServerRequests: () -> Boolean,
     loadPlaylistPickerPlaylists: (Boolean) -> Unit,
     syncPendingLibraryMutations: () -> Unit,
-    musicRepository: RemoteMusicRepository,
-    authRepository: RemoteAuthRepository,
-    setAccessToken: (String?) -> Unit,
-    applyFavoritesPayload: suspend (Playlist) -> Unit,
-    loadFavoritesPlaylistForTrack: suspend (Track) -> Unit,
-    markServerUnavailable: (Throwable) -> Unit,
-    setLibraryError: (String?) -> Unit,
 ) {
     LaunchedEffect(accountId, offlineOnly, syncMode) {
         if (canUseServerRequests()) {
@@ -370,37 +361,6 @@ internal fun PlaylistSyncEffects(
     LaunchedEffect(accountId, offlineOnly, syncMode, pendingLibraryMutationCount) {
         if (canUseServerRequests()) {
             syncPendingLibraryMutations()
-        }
-    }
-
-    LaunchedEffect(accountId, offlineOnly, playlists.map { "${it.id}:${it.trackIds.size}:${it.trackCount}" }) {
-        val favorites = playlists.firstOrNull { it.isFavoritesPlaylist() } ?: return@LaunchedEffect
-        if (!canUseServerRequests() || favorites.trackCount <= favorites.trackIds.size) {
-            return@LaunchedEffect
-        }
-        runCatching {
-            applyFavoritesPayload(favorites)
-            setAccessToken(authRepository.accessToken())
-        }.onFailure { error ->
-            if (error !is CancellationException) {
-                markServerUnavailable(error)
-                setLibraryError(error.userMessage())
-            }
-        }
-    }
-
-    LaunchedEffect(accountId, offlineOnly, syncMode, currentTrack?.id) {
-        val track = currentTrack ?: return@LaunchedEffect
-        if (!canUseServerRequests()) {
-            return@LaunchedEffect
-        }
-        runCatching {
-            loadFavoritesPlaylistForTrack(track)
-        }.onFailure { error ->
-            if (error !is CancellationException) {
-                markServerUnavailable(error)
-                setLibraryError(error.userMessage())
-            }
         }
     }
 }

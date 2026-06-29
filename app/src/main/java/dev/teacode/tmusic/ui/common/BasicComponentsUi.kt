@@ -42,10 +42,11 @@ fun SectionTitle(title: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun EmptyState(text: String) {
+fun EmptyState(text: String, modifier: Modifier = Modifier) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(8.dp),
+        modifier = modifier,
     ) {
         Text(
             text = text,

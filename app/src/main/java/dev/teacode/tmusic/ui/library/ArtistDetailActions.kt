@@ -4,7 +4,6 @@ import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
-import dev.teacode.tmusic.domain.LibrarySearchResults
 import dev.teacode.tmusic.domain.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -104,9 +103,6 @@ internal fun loadSimilarArtistsAction(
     setSimilarArtistLoadsInProgress: (Set<String>) -> Unit,
     getSimilarArtistsByArtist: () -> Map<String, List<LibraryArtist>>,
     setSimilarArtistsByArtist: (Map<String, List<LibraryArtist>>) -> Unit,
-    getArtists: () -> List<LibraryArtist>,
-    setArtists: (List<LibraryArtist>) -> Unit,
-    getSearchResults: () -> LibrarySearchResults,
     musicRepository: RemoteMusicRepository,
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
@@ -125,36 +121,13 @@ internal fun loadSimilarArtistsAction(
     setSimilarArtistLoadsInProgress(getSimilarArtistLoadsInProgress() + artistId)
     scope.launch {
         runCatching {
-            val cachedArtistsById = (
-                getArtists() + getSearchResults().artists + getSimilarArtistsByArtist().values.flatten()
-                )
-                .mapNotNull { cachedArtist -> cachedArtist.id?.let { id -> id to cachedArtist } }
-                .toMap()
             musicRepository.similarArtists(artistId = artistId, limit = 10, offset = 0)
-                .mapNotNull { similarArtist ->
-                    val similarArtistId = similarArtist.id?.takeIf { it.isNotBlank() }
-                    val cachedArtist = similarArtistId?.let(cachedArtistsById::get)
-                    when {
-                        cachedArtist != null && similarArtist.name == similarArtistId -> cachedArtist.copy(
-                            similarity = similarArtist.similarity,
-                        )
-                        cachedArtist != null -> similarArtist.copy(
-                            name = similarArtist.name.takeIf { it != similarArtistId } ?: cachedArtist.name,
-                        )
-                        similarArtistId != null && similarArtist.name == similarArtistId ->
-                            musicRepository.libraryArtist(similarArtistId)
-                                ?.copy(similarity = similarArtist.similarity)
-                                ?: similarArtist.takeIf { it.name != similarArtistId }
-                        else -> similarArtist
-                    }
-                }
         }.onSuccess { loadedArtists ->
             setAccessToken(refreshAccessToken())
             val normalizedArtists = loadedArtists
                 .distinctBy { it.id }
                 .manualSimilarArtistsFirst()
             setSimilarArtistsByArtist(getSimilarArtistsByArtist() + (artistId to normalizedArtists))
-            setArtists((getArtists() + normalizedArtists).distinctBy { it.id }.sortedArtistsForDisplay())
         }.onFailure { error ->
             markServerUnavailable(error)
             setLibraryError(error.userMessage())
