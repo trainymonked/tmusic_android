@@ -103,27 +103,28 @@ private fun ColumnScope.SyncedLyricsList(
     listState: LazyListState,
     onSeek: (Int) -> Unit,
 ) {
+    val centerSyncedLyrics = LocalCenterSyncedLyrics.current
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxWidth()
             .weight(1f),
         contentPadding = PaddingValues(top = 22.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         itemsIndexed(lines, key = { index, line -> "${line.timeMs}:$index" }) { index, line ->
             val active = index == activeIndex
             Text(
                 text = line.text.ifBlank { "\u2022\u2022\u2022" },
                 style = if (active) {
-                    MaterialTheme.typography.headlineSmall.copy(
-                        fontSize = 27.sp,
-                        lineHeight = 33.sp,
+                    MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 20.sp,
+                        lineHeight = 25.sp,
                     )
                 } else {
                     MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 19.sp,
-                        lineHeight = 26.sp,
+                        fontSize = 17.sp,
+                        lineHeight = 22.sp,
                     )
                 },
                 fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
@@ -132,7 +133,7 @@ private fun ColumnScope.SyncedLyricsList(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                textAlign = TextAlign.Center,
+                textAlign = if (centerSyncedLyrics) TextAlign.Center else TextAlign.Start,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = ScreenHorizontalPadding)
@@ -167,14 +168,14 @@ private fun ColumnScope.PlainLyricsList(plainLyrics: String) {
             .fillMaxWidth()
             .weight(1f),
         contentPadding = PaddingValues(top = 12.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items(plainLyrics.lines()) { line ->
             Text(
                 text = line,
                 style = MaterialTheme.typography.titleLarge.copy(
-                    fontSize = 20.sp,
-                    lineHeight = 28.sp,
+                    fontSize = 18.sp,
+                    lineHeight = 24.sp,
                 ),
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = ScreenHorizontalPadding),

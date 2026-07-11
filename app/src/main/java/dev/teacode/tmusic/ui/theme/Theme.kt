@@ -30,7 +30,7 @@ data class AppThemeController(
 
 val LocalAppThemeController = staticCompositionLocalOf {
     AppThemeController(
-        themeMode = AppThemeMode.Dark,
+        themeMode = AppThemeMode.System,
         onThemeModeChange = {},
     )
 }
@@ -88,7 +88,7 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun TMusicTheme(
-    themeMode: AppThemeMode = AppThemeMode.Dark,
+    themeMode: AppThemeMode = AppThemeMode.System,
     content: @Composable () -> Unit
 ) {
     val useDarkTheme = when (themeMode) {

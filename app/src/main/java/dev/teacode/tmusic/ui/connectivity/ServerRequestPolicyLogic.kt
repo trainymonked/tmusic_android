@@ -10,8 +10,7 @@ internal fun canUseServerRequests(
 ): Boolean {
     return account != null &&
         !offlineOnly &&
-        syncMode != SyncMode.Offline &&
-        syncMode != SyncMode.OfflineOnly &&
+        syncMode.allowsServerRequests() &&
         hasNetworkConnection
 }
 
@@ -23,7 +22,7 @@ internal fun canAttemptMetadataRequest(
 ): Boolean {
     return account != null &&
         !offlineOnly &&
-        syncMode != SyncMode.OfflineOnly &&
+        syncMode.allowsServerRequests() &&
         hasNetworkConnection
 }
 
@@ -35,7 +34,7 @@ internal fun canUseMediaServerRequests(
 ): Boolean {
     return account != null &&
         !offlineOnly &&
-        syncMode != SyncMode.OfflineOnly &&
+        syncMode.allowsServerRequests() &&
         hasNetworkConnection &&
         account.canPlayMedia
 }
@@ -43,9 +42,17 @@ internal fun canUseMediaServerRequests(
 internal fun canCheckAppUpdates(
     account: Account?,
     offlineOnly: Boolean,
+    syncMode: SyncMode,
     hasNetworkConnection: Boolean,
 ): Boolean {
-    return account != null && !offlineOnly && hasNetworkConnection
+    return account != null &&
+        !offlineOnly &&
+        syncMode.allowsServerRequests() &&
+        hasNetworkConnection
+}
+
+private fun SyncMode.allowsServerRequests(): Boolean {
+    return this == SyncMode.Online || this == SyncMode.Syncing
 }
 
 internal fun appUpdateDebugStatus(

@@ -50,6 +50,7 @@ internal fun playQueuedTrackAction(
     clearGaplessPlaybackState: () -> Unit,
     localOrCachedPlaybackUrl: (Track) -> String?,
     loadArtwork: (String, ArtworkImageSize) -> Unit,
+    cancelNextTrackPrefetch: () -> Unit,
     prefetchNextTrackUrl: (PlaybackQueue) -> Unit,
     startGaplessPlayback: (Track, PlaybackQueue, List<String>, Long) -> Unit,
     startPlayback: (Track, String, Long) -> Unit,
@@ -154,6 +155,10 @@ internal fun playQueuedTrackAction(
         currentQueue.sourceType != updatedQueue.sourceType ||
         currentQueue.sourceId != updatedQueue.sourceId
     if (isDifferentQueueItem) {
+        if (!request.newQueue) {
+            nextStreamRequestSerial()
+        }
+        cancelNextTrackPrefetch()
         clearGaplessPlaybackState()
         setPlayerState(
             PlayerState(
@@ -169,9 +174,6 @@ internal fun playQueuedTrackAction(
     setPlaybackQueue(updatedQueue)
     setPlayerError(null)
     loadArtwork(track.listArtworkKey(), ArtworkImageSize.FullPlayer)
-    if (updatedQueue.canSkip) {
-        prefetchNextTrackUrl(updatedQueue)
-    }
     val gaplessLocalUrls = if (updatedQueue.canSkip) {
         updatedQueue.tracks.map { queuedTrack ->
             localOrCachedPlaybackUrl(queuedTrack)

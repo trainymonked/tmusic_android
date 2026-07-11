@@ -8,7 +8,7 @@ import dev.teacode.tmusic.data.OfflineLyricsStore
 import dev.teacode.tmusic.data.PlaybackStateStore
 import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.UserPreferencesStore
-import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.PlayerState
@@ -25,6 +25,7 @@ internal class StorageMaintenanceActionHost(
     private val getPlaylistDownloadJobs: () -> Map<String, Job>,
     private val setPlaylistDownloadJobs: (Map<String, Job>) -> Unit,
     private val getPlayerState: () -> PlayerState,
+    private val getActivePlaybackCacheKey: () -> String?,
     private val setPlayerState: (PlayerState) -> Unit,
     private val getPlaylists: () -> List<Playlist>,
     private val setPlaylists: (List<Playlist>) -> Unit,
@@ -59,17 +60,14 @@ internal class StorageMaintenanceActionHost(
     private val setLibraryNotice: (String?) -> Unit,
     private val setLibraryError: (String?) -> Unit,
     private val refreshStorageStats: () -> Unit,
-    private val getAccount: () -> Account?,
     private val setArtworkLoadsInProgress: (Set<String>) -> Unit,
     private val setProfileAvatarBitmap: (ImageBitmap?) -> Unit,
     private val setProfileAvatarLoadKey: (String?) -> Unit,
     private val appCacheStore: AppCacheStore,
-    private val retainedTrackIds: () -> Set<String>,
-    private val retainedPlaybackCacheKeys: () -> Set<String>,
+    private val updateTrackDownloadState: (String, DownloadState) -> Unit,
     private val clearPlaybackCache: () -> Unit,
     private val clearPlaybackCacheExcept: (Set<String>) -> Unit,
     private val playbackCacheDirName: String,
-    private val loadProfileAvatar: (Account) -> Unit,
 ) {
     fun clearDownloads() {
         clearDownloadsAction(
@@ -117,31 +115,40 @@ internal class StorageMaintenanceActionHost(
     }
 
     fun clearAppCache() {
+        getAlbumDownloadJobs().values.forEach { job -> job.cancel() }
+        getPlaylistDownloadJobs().values.forEach { job -> job.cancel() }
+        setAlbumDownloadJobs(emptyMap())
+        setPlaylistDownloadJobs(emptyMap())
+        clearCollectionDownloadPauses()
         clearAppCacheAction(
             scope = scope,
-            getAccount = getAccount,
             getPlaylists = getPlaylists,
             getTracks = getTracks,
+            updateTrackDownloadState = updateTrackDownloadState,
             getSavedAlbums = getSavedAlbums,
+            getPlayerState = getPlayerState,
+            getActivePlaybackCacheKey = getActivePlaybackCacheKey,
+            setPlayerState = setPlayerState,
             getArtworkBitmaps = getArtworkBitmaps,
             setArtworkBitmaps = setArtworkBitmaps,
             setArtworkLoadsInProgress = setArtworkLoadsInProgress,
             setProfileAvatarBitmap = setProfileAvatarBitmap,
             setProfileAvatarLoadKey = setProfileAvatarLoadKey,
             setPrefetchedPlaybackUrls = setPrefetchedPlaybackUrls,
+            setPlaybackUrlPrefetchesInProgress = setPlaybackUrlPrefetchesInProgress,
+            getLyricsByTrackId = getLyricsByTrackId,
+            setLyricsByTrackId = setLyricsByTrackId,
             setLibraryNotice = setLibraryNotice,
             musicRepository = musicRepository,
             appCacheStore = appCacheStore,
             artworkCacheStore = artworkCacheStore,
+            offlineLyricsStore = offlineLyricsStore,
             libraryCacheStore = libraryCacheStore,
             playbackStateStore = playbackStateStore,
-            retainedTrackIds = retainedTrackIds(),
-            retainedPlaybackCacheKeys = retainedPlaybackCacheKeys(),
             clearPlaybackCache = clearPlaybackCache,
             clearPlaybackCacheExcept = clearPlaybackCacheExcept,
             playbackCacheDirName = playbackCacheDirName,
             refreshStorageStats = refreshStorageStats,
-            loadProfileAvatar = loadProfileAvatar,
         )
     }
 }

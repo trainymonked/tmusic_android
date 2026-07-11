@@ -21,22 +21,40 @@ class ArtworkCacheStore(context: Context) {
         return file.absolutePath
     }
 
-    suspend fun cache(trackId: String, artworkUrl: String): String = withContext(Dispatchers.IO) {
+    suspend fun cache(trackId: String, artworkUrl: String): String {
+        return cacheFile(trackId, artworkUrl, replaceExisting = false)
+    }
+
+    suspend fun refresh(trackId: String, artworkUrl: String): String {
+        return cacheFile(trackId, artworkUrl, replaceExisting = true)
+    }
+
+    private suspend fun cacheFile(
+        trackId: String,
+        artworkUrl: String,
+        replaceExisting: Boolean,
+    ): String = withContext(Dispatchers.IO) {
         artworkDirectory.mkdirs()
         val destination = artworkFile(trackId)
-        if (destination.exists() && destination.length() > 0L) {
+        if (!replaceExisting && destination.exists() && destination.length() > 0L) {
             destination.setLastModified(System.currentTimeMillis())
             return@withContext destination.absolutePath
         }
 
         val temporary = File(artworkDirectory, "${trackId.safeFileName()}.tmp")
+        temporary.delete()
         val connection = (URL(artworkUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
+            useCaches = !replaceExisting
             setRequestProperty("X-TMusic-Platform", "android")
             setRequestProperty("X-TMusic-Version-Code", BuildConfig.VERSION_CODE.toString())
             setRequestProperty("X-TMusic-Version-Name", BuildConfig.VERSION_NAME)
+            if (replaceExisting) {
+                setRequestProperty("Cache-Control", "no-cache")
+                setRequestProperty("Pragma", "no-cache")
+            }
         }
 
         try {
@@ -49,6 +67,9 @@ class ArtworkCacheStore(context: Context) {
                     input.copyTo(output)
                 }
             }
+        } catch (error: Throwable) {
+            temporary.delete()
+            throw error
         } finally {
             connection.disconnect()
         }

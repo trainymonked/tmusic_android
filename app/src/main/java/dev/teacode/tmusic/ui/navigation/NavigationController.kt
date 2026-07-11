@@ -15,6 +15,7 @@ internal class NavigationController(
     private val loadArtists: (ArtistSortOption) -> Unit,
     private val loadFullFavoritesPlaylist: (Playlist) -> Unit,
     private val loadPlaylistTracks: (Playlist, Boolean) -> Unit,
+    private val refreshPlaylist: (Playlist) -> Unit,
     private val loadArtwork: (String, ArtworkImageSize) -> Unit,
     private val resolveCachedArtist: (String) -> LibraryArtist?,
     private val openArtist: (LibraryArtist) -> Unit,
@@ -43,11 +44,7 @@ internal class NavigationController(
             appState.playlists.firstOrNull { it.id == playlistId }
         }
         if (selectedPlaylist != null) {
-            if (selectedPlaylist.isFavoritesPlaylist()) {
-                loadFullFavoritesPlaylist(selectedPlaylist)
-            } else {
-                loadPlaylistTracks(selectedPlaylist, true)
-            }
+            refreshPlaylist(selectedPlaylist)
         } else {
             loadLibrary(AppDestination(tab = AppTab.Library))
         }

@@ -116,6 +116,7 @@ internal fun createLibraryLoadActionHost(
     lastFmAuthTokenStore: LastFmAuthTokenStore,
     signOutLocalSession: suspend (String?) -> Unit,
     markServerUnavailable: (Throwable) -> Unit,
+    hasNetworkConnection: () -> Boolean,
 ) = LibraryLoadActionHost(
     scope = scope,
     getDefaultDestination = { appState.destination },
@@ -131,6 +132,7 @@ internal fun createLibraryLoadActionHost(
     setAccount = { appState.account = it },
     authRepository = authRepository,
     musicRepository = musicRepository,
+    getSyncMode = { appState.syncMode },
     setSyncMode = { appState.syncMode = it },
     getPlaylists = { appState.playlists },
     setPlaylists = { appState.playlists = it },
@@ -162,5 +164,6 @@ internal fun createLibraryLoadActionHost(
     setWaitingForLastFmSession = { appState.waitingForLastFmSession = it },
     signOutLocalSession = signOutLocalSession,
     markServerUnavailable = markServerUnavailable,
+    hasNetworkConnection = hasNetworkConnection,
     setLibraryError = { appState.libraryError = it },
 )

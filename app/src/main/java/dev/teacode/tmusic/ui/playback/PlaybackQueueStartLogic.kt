@@ -87,19 +87,23 @@ internal fun shufflePlayPlaylistWithBackgroundResolve(
     playlist: Playlist,
     playlistTracks: List<Track>,
     existingQueueTracks: List<Track>,
+    canUseServerRequests: () -> Boolean,
     nextRequestSerial: () -> Long,
     setShuffleEnabled: () -> Unit,
     playQueue: (Track, PlaybackQueue, Int) -> Unit,
+    resolveTracks: suspend (Playlist, List<Track>) -> List<Track>,
     isRequestCurrent: (Long) -> Boolean,
     replaceQueue: (Long, PlaybackQueue, String) -> Unit,
+    markServerUnavailable: (Throwable) -> Unit,
+    setPlayerError: (String) -> Unit,
 ) {
     if (playlistTracks.isEmpty()) {
         return
     }
     val requestSerial = nextRequestSerial()
-    fun startShuffledQueue(sourceTracks: List<Track>) {
+    fun startShuffledQueue(sourceTracks: List<Track>): Track? {
         if (sourceTracks.isEmpty()) {
-            return
+            return null
         }
         val firstTrack = randomizedFirstPlaylistTrack(sourceTracks, existingQueueTracks)
         logPlaybackDebug(
@@ -122,9 +126,53 @@ internal fun shufflePlayPlaylistWithBackgroundResolve(
             ),
             0,
         )
+        return firstTrack
     }
 
-    startShuffledQueue(playlistTracks)
+    val firstTrack = startShuffledQueue(playlistTracks) ?: return
+    if (!canUseServerRequests()) {
+        return
+    }
+
+    scope.launch {
+        runCatching {
+            resolveTracks(playlist, playlistTracks)
+        }.onSuccess { resolvedTracks ->
+            if (resolvedTracks.isEmpty() || !isRequestCurrent(requestSerial)) {
+                return@onSuccess
+            }
+            val resolvedFirstTrack = resolvedTracks.firstOrNull { it.id == firstTrack.id }
+                ?: firstTrack
+            val randomizedTracks = randomizedPlaylistTracksStartingWith(
+                tracks = resolvedTracks,
+                existingQueueTracks = existingQueueTracks,
+                firstTrack = resolvedFirstTrack,
+            )
+            replaceQueue(
+                requestSerial,
+                PlaybackQueue(
+                    playlistId = playlist.id,
+                    sourceType = PlaybackSourceType.Playlist,
+                    sourceId = playlist.id,
+                    sourceTitle = playlist.title,
+                    tracks = randomizedTracks,
+                    sourceTracks = resolvedTracks,
+                    isShuffled = true,
+                    currentIndex = 0,
+                ),
+                resolvedFirstTrack.id,
+            )
+            logPlaybackDebug(
+                "shuffle playlist background resolve playlist=${playlist.id} " +
+                    "resolved=${resolvedTracks.size} requestCurrent=${isRequestCurrent(requestSerial)}",
+            )
+        }.onFailure { error ->
+            if (isRequestCurrent(requestSerial)) {
+                markServerUnavailable(error)
+                setPlayerError(error.userMessage())
+            }
+        }
+    }
 }
 
 internal fun playAlbumTrackWithBackgroundResolve(

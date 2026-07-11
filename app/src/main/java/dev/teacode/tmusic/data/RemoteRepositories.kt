@@ -36,6 +36,14 @@ class RemoteAuthRepository(
         apiClient.setBaseUrl(baseUrl)
     }
 
+    fun setServerResponseListener(listener: (() -> Unit)?) {
+        apiClient.setServerResponseListener(listener)
+    }
+
+    fun setServerFailureListener(listener: ((Throwable) -> Unit)?) {
+        apiClient.setServerFailureListener(listener)
+    }
+
     suspend fun appUpdateConfig(): AppUpdateInfo? {
         return apiClient.appUpdateConfig()
     }
@@ -297,6 +305,10 @@ class RemoteMusicRepository(
 
     suspend fun downloadsSizeBytes(): Long {
         return offlineTrackStore.sizeBytes()
+    }
+
+    suspend fun removeDownloadsExcept(retainedTrackIds: Set<String>) {
+        offlineTrackStore.removeDownloadsExcept(retainedTrackIds)
     }
 
     override suspend fun removeDownloadedTrack(trackId: String) {

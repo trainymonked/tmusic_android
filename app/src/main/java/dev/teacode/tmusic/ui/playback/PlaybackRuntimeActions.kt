@@ -8,8 +8,11 @@ import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.domain.Track
 import java.net.HttpURLConnection
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 internal fun handlePlaybackPlayerErrorAction(
@@ -233,6 +236,7 @@ internal fun installGaplessPrefetchAction(
     nextIndex: Int,
     nextUrl: String,
     exoPlayer: ExoPlayer,
+    resolvePlaybackMediaCacheKey: (String, String) -> String?,
     getPlayerState: () -> PlayerState,
     getGaplessPlaybackRequest: () -> GaplessPlaybackRequest?,
     getGaplessMediaQueueIndices: () -> Map<String, Int>,
@@ -281,6 +285,10 @@ internal fun installGaplessPrefetchAction(
             MediaItem.Builder()
                 .setUri(nextUrl)
                 .setMediaId(mediaId)
+                .apply {
+                    resolvePlaybackMediaCacheKey(nextTrack.id, nextUrl)
+                        ?.let { cacheKey -> setCustomCacheKey(cacheKey) }
+                }
                 .build(),
         )
         setGaplessMediaQueueIndices(getGaplessMediaQueueIndices() + (mediaId to nextIndex))
@@ -304,6 +312,8 @@ internal fun installGaplessPrefetchAction(
 internal fun prefetchNextTrackUrlAction(
     scope: CoroutineScope,
     queue: PlaybackQueue,
+    requestSerial: Long,
+    isRequestCurrent: (Long) -> Boolean,
     getAccount: () -> Account?,
     getRepeatMode: () -> PlaybackRepeatMode,
     getPrefetchedPlaybackUrls: () -> Map<String, String>,
@@ -317,13 +327,14 @@ internal fun prefetchNextTrackUrlAction(
     musicRepository: RemoteMusicRepository,
     authRepository: RemoteAuthRepository,
     setAccessToken: (String?) -> Unit,
-) {
-    if (!queue.canSkip || getAccount()?.canPlayMedia == false) {
-        return
+): Job? {
+    if (!queue.canSkip || queue.tracks.isEmpty() || getAccount()?.canPlayMedia == false) {
+        return null
     }
 
     val currentIndex = queue.currentIndex.coerceIn(0, queue.tracks.lastIndex)
     val queuedIndices = linkedSetOf<Int>()
+    val prioritizedTracks = mutableListOf<Pair<Int, Track>>()
     for (step in 1..GAPLESS_PREFETCH_LOOKAHEAD) {
         val rawIndex = currentIndex + step
         val nextIndex = when {
@@ -334,25 +345,49 @@ internal fun prefetchNextTrackUrlAction(
         if (!queuedIndices.add(nextIndex)) {
             break
         }
-        val nextTrack = queue.tracks[nextIndex]
-        prefetchTrackAssets(nextTrack)
-        val cachedUrl = localOrCachedPlaybackUrl(nextTrack)
-        val prefetchedUrl = getPrefetchedPlaybackUrls()[nextTrack.id]
-        when {
-            cachedUrl != null -> installGaplessPrefetch(queue, nextTrack, nextIndex, cachedUrl)
-            prefetchedUrl != null -> installGaplessPrefetch(queue, nextTrack, nextIndex, prefetchedUrl)
-            !canUseMediaServerRequests() || nextTrack.id in getPlaybackUrlPrefetchesInProgress() -> Unit
-            else -> {
-                setPlaybackUrlPrefetchesInProgress(getPlaybackUrlPrefetchesInProgress() + nextTrack.id)
-                scope.launch {
-                    runCatching {
-                        musicRepository.streamUrl(nextTrack.id)
-                    }.onSuccess { streamUrl ->
+        prioritizedTracks += nextIndex to queue.tracks[nextIndex]
+    }
+    val retainedTrackIds = prioritizedTracks
+        .mapTo(mutableSetOf(queue.tracks[currentIndex].id)) { (_, track) -> track.id }
+    setPrefetchedPlaybackUrls(
+        getPrefetchedPlaybackUrls().filterKeys { trackId -> trackId in retainedTrackIds },
+    )
+
+    return scope.launch {
+        for ((nextIndex, nextTrack) in prioritizedTracks) {
+            currentCoroutineContext().ensureActive()
+            if (!isRequestCurrent(requestSerial)) {
+                return@launch
+            }
+            prefetchTrackAssets(nextTrack)
+            val cachedUrl = localOrCachedPlaybackUrl(nextTrack)
+            val prefetchedUrl = getPrefetchedPlaybackUrls()[nextTrack.id]
+            when {
+                cachedUrl != null -> installGaplessPrefetch(queue, nextTrack, nextIndex, cachedUrl)
+                prefetchedUrl != null -> installGaplessPrefetch(queue, nextTrack, nextIndex, prefetchedUrl)
+                !canUseMediaServerRequests() -> Unit
+                else -> {
+                    setPlaybackUrlPrefetchesInProgress(getPlaybackUrlPrefetchesInProgress() + nextTrack.id)
+                    try {
+                        val streamUrl = musicRepository.streamUrl(nextTrack.id)
+                        currentCoroutineContext().ensureActive()
+                        if (!isRequestCurrent(requestSerial)) {
+                            return@launch
+                        }
                         setPrefetchedPlaybackUrls(getPrefetchedPlaybackUrls() + (nextTrack.id to streamUrl))
                         setAccessToken(authRepository.accessToken())
                         installGaplessPrefetch(queue, nextTrack, nextIndex, streamUrl)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Throwable) {
+                        // Prefetch failures are retried when the track becomes current.
+                    } finally {
+                        if (isRequestCurrent(requestSerial)) {
+                            setPlaybackUrlPrefetchesInProgress(
+                                getPlaybackUrlPrefetchesInProgress() - nextTrack.id,
+                            )
+                        }
                     }
-                    setPlaybackUrlPrefetchesInProgress(getPlaybackUrlPrefetchesInProgress() - nextTrack.id)
                 }
             }
         }

@@ -14,6 +14,7 @@ internal class LibraryDetailActionHost(
     private val musicRepository: RemoteMusicRepository,
     private val authRepository: RemoteAuthRepository,
     private val canAttemptMetadataRequest: () -> Boolean,
+    private val hasNetworkConnection: () -> Boolean,
     private val canUseServerRequests: () -> Boolean,
     private val getSyncMode: () -> SyncMode,
     private val setSyncMode: (SyncMode) -> Unit,
@@ -57,12 +58,19 @@ internal class LibraryDetailActionHost(
     private val markServerUnavailable: (Throwable) -> Unit,
     private val setLibraryError: (String?) -> Unit,
 ) {
-    fun loadPlaylistTracks(playlist: Playlist, force: Boolean = false) {
+    fun loadPlaylistTracks(
+        playlist: Playlist,
+        force: Boolean = false,
+        allowOfflineProbe: Boolean = false,
+        onLoaded: () -> Unit = {},
+    ) {
         loadPlaylistTracksAction(
             scope = scope,
             playlist = playlist,
             force = force,
+            allowOfflineProbe = allowOfflineProbe,
             canAttemptMetadataRequest = canAttemptMetadataRequest,
+            hasNetworkConnection = hasNetworkConnection,
             getSyncMode = getSyncMode,
             setSyncMode = setSyncMode,
             getPlaylistTrackLoadsInProgress = getPlaylistTrackLoadsInProgress,
@@ -78,6 +86,7 @@ internal class LibraryDetailActionHost(
             applyPlaylistTrackPage = applyPlaylistTrackPage,
             markServerUnavailable = markServerUnavailable,
             setLibraryError = setLibraryError,
+            onLoaded = onLoaded,
         )
     }
 

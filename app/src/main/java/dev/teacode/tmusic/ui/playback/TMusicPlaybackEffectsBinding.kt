@@ -121,6 +121,7 @@ internal fun TMusicPlaybackEffectsBinding(
     CrossfadePreparationEffects(
         exoPlayer = exoPlayer,
         standbyExoPlayer = standbyExoPlayer,
+        mediaCache = mediaCache,
         playerState = appState.playerState,
         playbackQueue = appState.playbackQueue,
         playbackQueueGeneration = appState.playbackQueueGeneration,

@@ -90,9 +90,9 @@ fun ArtistsScreen(
                             .fillMaxWidth()
                             .padding(horizontal = ScreenHorizontalPadding),
                     ) {
-                        if (isRefreshing || isLoadingMore) {
+                        if (isLoadingMore && !isRefreshing) {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        } else {
+                        } else if (!isRefreshing) {
                             EmptyState("No artists loaded yet")
                         }
                     }
@@ -108,7 +108,7 @@ fun ArtistsScreen(
                         )
                     }
                 }
-                if (isLoadingMore) {
+                if (isLoadingMore && !isRefreshing) {
                     item {
                         LinearProgressIndicator(
                             modifier = Modifier

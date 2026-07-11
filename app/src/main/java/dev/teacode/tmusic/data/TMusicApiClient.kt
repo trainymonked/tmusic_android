@@ -56,8 +56,21 @@ class TMusicApiClient(
     @Volatile
     private var baseUrl: String = initialBaseUrl.trimEnd('/')
 
+    @Volatile
+    private var serverResponseListener: (() -> Unit)? = null
+    @Volatile
+    private var serverFailureListener: ((Throwable) -> Unit)? = null
+
     fun setBaseUrl(nextBaseUrl: String) {
         baseUrl = nextBaseUrl.trimEnd('/')
+    }
+
+    fun setServerResponseListener(listener: (() -> Unit)?) {
+        serverResponseListener = listener
+    }
+
+    fun setServerFailureListener(listener: ((Throwable) -> Unit)?) {
+        serverFailureListener = listener
     }
 
     suspend fun signInWithGoogle(idToken: String): AuthSession {
@@ -248,6 +261,15 @@ class TMusicApiClient(
                 trackOffset = offset,
             )
             pages += page
+            val pagePlaylist = page.playlists.firstOrNull()
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    API_LOG_TAG,
+                    "favorites parsed offset=$offset rows=${pagePlaylist?.trackIds.orEmpty().size} " +
+                        "playlistTrackIds=${pagePlaylist?.playlistTrackIds.orEmpty().size} " +
+                        "trackModels=${page.tracks.size} total=${pagePlaylist?.trackCount}",
+                )
+            }
             val loadedTrackCount = pages.flatMap { payload -> payload.playlists.firstOrNull()?.trackIds.orEmpty() }.size
             val totalTrackCount = pages.asSequence()
                 .mapNotNull { payload -> payload.playlists.firstOrNull()?.trackCount?.takeIf { it > 0 } }
@@ -264,7 +286,17 @@ class TMusicApiClient(
             offset += FAVORITES_FULL_TRACK_PAGE_LIMIT
         }
 
-        return pages.mergeSinglePlaylistPayload()
+        val merged = pages.mergeSinglePlaylistPayload()
+        if (BuildConfig.DEBUG) {
+            val mergedPlaylist = merged.playlists.firstOrNull()
+            Log.d(
+                API_LOG_TAG,
+                "favorites merged rows=${mergedPlaylist?.trackIds.orEmpty().size} " +
+                    "playlistTrackIds=${mergedPlaylist?.playlistTrackIds.orEmpty().size} " +
+                    "trackModels=${merged.tracks.size} total=${mergedPlaylist?.trackCount}",
+            )
+        }
+        return merged
     }
 
     suspend fun favoritesPlaylistPayloadPage(
@@ -1144,41 +1176,52 @@ class TMusicApiClient(
         readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): ApiResponse {
         val url = baseUrl + path
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = readTimeoutMs
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("X-TMusic-Platform", "android")
-            setRequestProperty("X-TMusic-Version-Code", BuildConfig.VERSION_CODE.toString())
-            setRequestProperty("X-TMusic-Version-Name", BuildConfig.VERSION_NAME)
-            accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+        var connection: HttpURLConnection? = null
+        return try {
+            val activeConnection = URL(url).openConnection() as HttpURLConnection
+            connection = activeConnection
+            activeConnection.apply {
+                requestMethod = method
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = readTimeoutMs
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("X-TMusic-Platform", "android")
+                setRequestProperty("X-TMusic-Version-Code", BuildConfig.VERSION_CODE.toString())
+                setRequestProperty("X-TMusic-Version-Name", BuildConfig.VERSION_NAME)
+                accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
 
-            if (body != null) {
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                outputStream.use { stream ->
-                    stream.write(body.toByteArray(Charsets.UTF_8))
+                if (body != null) {
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    outputStream.use { stream ->
+                        stream.write(body.toByteArray(Charsets.UTF_8))
+                    }
                 }
             }
-        }
-
-        return try {
-            val statusCode = connection.responseCode
+            val statusCode = activeConnection.responseCode
             val responseStream = if (statusCode in 200..399) {
-                connection.inputStream
+                activeConnection.inputStream
             } else {
-                connection.errorStream
+                activeConnection.errorStream
             }
-            ApiResponse(
+            val response = ApiResponse(
                 statusCode = statusCode,
                 body = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty(),
             )
+            runCatching { serverResponseListener?.invoke() }
+                .onFailure { error ->
+                    Log.w(API_LOG_TAG, "Server response listener failed.", error)
+                }
+            response
         } catch (error: Exception) {
             Log.e(API_LOG_TAG, "$method $url failed: ${error.javaClass.simpleName}: ${error.message}", error)
+            runCatching { serverFailureListener?.invoke(error) }
+                .onFailure { listenerError ->
+                    Log.w(API_LOG_TAG, "Server failure listener failed.", listenerError)
+                }
             throw error
         } finally {
-            connection.disconnect()
+            connection?.disconnect()
         }
     }
 

@@ -31,14 +31,14 @@ internal fun ObserveNetworkConnectivity(
     enabled: Boolean,
     useLocalBackend: Boolean,
     onNetworkPolicyChanged: () -> Unit,
-    onDisconnected: () -> Unit,
-    onReconnected: () -> Unit,
+    onConnectionStateChanged: (Boolean) -> Unit,
+    onNetworkAvailableOrChanged: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val policyChangedState = rememberUpdatedState(onNetworkPolicyChanged)
-    val disconnectedState = rememberUpdatedState(onDisconnected)
-    val reconnectedState = rememberUpdatedState(onReconnected)
+    val connectionStateChangedState = rememberUpdatedState(onConnectionStateChanged)
+    val networkAvailableOrChangedState = rememberUpdatedState(onNetworkAvailableOrChanged)
 
     DisposableEffect(context, enabled, useLocalBackend) {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -46,56 +46,56 @@ internal fun ObserveNetworkConnectivity(
             return@DisposableEffect onDispose {}
         }
 
-        var wasUsable = context.hasUsableNetworkConnection(useLocalBackend)
-        var wasCellular = context.isUsingCellularNetwork()
-        fun dispatchNetworkState(
-            isUsable: Boolean,
-            isCellular: Boolean,
-        ) {
+        var observedNetwork = connectivityManager.activeNetwork
+        val initialCapabilities = observedNetwork
+            ?.let { network -> connectivityManager.getNetworkCapabilities(network) }
+        var wasUsable = initialCapabilities?.isUsableNetwork(useLocalBackend) == true
+        var wasCellular = initialCapabilities
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+        fun dispatchCurrentNetworkState() {
+            val currentNetwork = connectivityManager.activeNetwork
+            val capabilities = currentNetwork
+                ?.let { network -> connectivityManager.getNetworkCapabilities(network) }
+            val isUsable = capabilities?.isUsableNetwork(useLocalBackend) == true
+            val isCellular = capabilities
+                ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+            val networkChanged = currentNetwork != observedNetwork
+            val availabilityChanged = isUsable != wasUsable
+            val transportChanged = isCellular != wasCellular
+            val policyChanged = availabilityChanged || transportChanged
+            if (!networkChanged && !policyChanged) {
+                return
+            }
+            observedNetwork = currentNetwork
+            wasUsable = isUsable
+            wasCellular = isCellular
             scope.launch {
-                val availabilityChanged = isUsable != wasUsable
-                val policyChanged = availabilityChanged || isCellular != wasCellular
-                if (!policyChanged) {
-                    return@launch
+                if (policyChanged) {
+                    policyChangedState.value()
                 }
-                val previouslyUsable = wasUsable
-                wasUsable = isUsable
-                wasCellular = isCellular
-                policyChangedState.value()
-                if (!availabilityChanged) {
-                    return@launch
+                if (availabilityChanged) {
+                    connectionStateChangedState.value(isUsable)
                 }
-                if (isUsable && !previouslyUsable) {
-                    reconnectedState.value()
-                } else if (!isUsable && previouslyUsable) {
-                    disconnectedState.value()
+                if (isUsable && (networkChanged || availabilityChanged || transportChanged)) {
+                    networkAvailableOrChangedState.value()
                 }
             }
         }
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                dispatchNetworkState(
-                    isUsable = context.hasUsableNetworkConnection(useLocalBackend),
-                    isCellular = context.isUsingCellularNetwork(),
-                )
+                dispatchCurrentNetworkState()
             }
 
             override fun onCapabilitiesChanged(
                 network: Network,
                 networkCapabilities: NetworkCapabilities,
             ) {
-                dispatchNetworkState(
-                    isUsable = networkCapabilities.isUsableNetwork(useLocalBackend),
-                    isCellular = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
-                )
+                dispatchCurrentNetworkState()
             }
 
             override fun onLost(network: Network) {
-                dispatchNetworkState(
-                    isUsable = context.hasUsableNetworkConnection(useLocalBackend),
-                    isCellular = context.isUsingCellularNetwork(),
-                )
+                dispatchCurrentNetworkState()
             }
         }
 
@@ -107,8 +107,5 @@ internal fun ObserveNetworkConnectivity(
 }
 
 private fun NetworkCapabilities.isUsableNetwork(useLocalBackend: Boolean): Boolean {
-    if (!hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-        return false
-    }
-    return useLocalBackend || hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    return hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }

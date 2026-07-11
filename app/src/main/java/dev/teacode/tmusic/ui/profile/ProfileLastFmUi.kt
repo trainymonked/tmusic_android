@@ -31,11 +31,7 @@ internal fun ProfileLastFmSection(
             ProfileSettingDivider()
             ProfileSwitchRow(
                 title = "Scrobbling",
-                subtitle = if (scrobblingPaused) {
-                    "Listening history is paused"
-                } else {
-                    "Listening history is collected"
-                },
+                subtitle = "",
                 checked = !scrobblingPaused,
                 onCheckedChange = { enabled -> onScrobblingPausedChange(!enabled) },
             )
@@ -56,7 +52,7 @@ internal fun ProfileLastFmSection(
             ProfileSettingDivider()
             ProfileActionRow(
                 title = "Disconnect Last.fm",
-                subtitle = "Stop scrobbling",
+                subtitle = "",
                 actionLabel = "Disconnect",
                 onAction = onDisconnect,
                 enabled = canUseNetwork,

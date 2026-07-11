@@ -103,7 +103,15 @@ fun AlbumScreen(
             .thenBy { it.title.lowercase() }
             .thenBy { it.id },
     )
-    val playableTracks = if (canPlayFromNetwork) tracks else tracks.filter { it.id in offlinePlayableTrackIds }
+    val playableTrackIds = remember(canPlayFromNetwork, tracks, offlinePlayableTrackIds) {
+        if (canPlayFromNetwork) {
+            tracks.map { it.id }.toSet()
+        } else {
+            offlinePlayableTrackIds + tracks
+                .filter { it.downloadState == DownloadState.Downloaded }
+                .map { it.id }
+        }
+    }
     LoadMoreEffect(
         listState = listState,
         itemCount = displayTracks.size + 1,
@@ -154,7 +162,7 @@ fun AlbumScreen(
                     ) {
                         Button(
                             onClick = if (isActiveAlbum) onTogglePlayback else onPlayAlbum,
-                            enabled = playableTracks.isNotEmpty(),
+                            enabled = playableTrackIds.isNotEmpty(),
                             modifier = Modifier
                                 .height(44.dp)
                                 .width(132.dp),
@@ -216,13 +224,13 @@ fun AlbumScreen(
                         EmptyState("Album was not found")
                     }
                 }
-            } else if (isLoading && displayTracks.isEmpty()) {
+            } else if (isLoading && displayTracks.isEmpty() && !isRefreshing) {
                 item {
                     Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
                         LoadingScreen("Loading album tracks")
                     }
                 }
-            } else if (displayTracks.isEmpty()) {
+            } else if (displayTracks.isEmpty() && !isRefreshing) {
                 item {
                     Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
                         EmptyState("No tracks loaded for this album yet")
@@ -271,11 +279,11 @@ fun AlbumScreen(
                         onToggleFavorite = onToggleTrackFavorite?.let { toggle -> { toggle(track) } },
                         downloadBadgePlacement = DownloadBadgePlacement.BeforeTitle,
                         leadingLabel = track.trackNumber?.toString().orEmpty(),
-                        enabled = true,
+                        enabled = track.id in playableTrackIds,
                     )
                     }
                 }
-                if (isLoadingMore) {
+                if (isLoadingMore && !isRefreshing) {
                     item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
                 }
                 album.releaseYear?.let { year ->

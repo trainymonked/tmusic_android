@@ -163,6 +163,13 @@ fun SearchScreen(
                 )
             }
         }
+        if (!onlineMode) {
+            item {
+                Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                    OfflineNotice("Offline. Search is limited to cached data.")
+                }
+            }
+        }
         if (normalizedQuery.isBlank()) {
             item {
                 Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {

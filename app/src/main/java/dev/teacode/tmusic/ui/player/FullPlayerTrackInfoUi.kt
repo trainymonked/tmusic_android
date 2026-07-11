@@ -1,6 +1,8 @@
 package dev.teacode.tmusic.ui
 
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,11 +14,13 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.teacode.tmusic.domain.Track
 
 @Composable
@@ -34,6 +38,8 @@ internal fun FullPlayerTrackInfo(
     ) {
         FullPlayerTrackText(
             track = track,
+            onGoToArtist = onGoToArtist,
+            onGoToAlbum = onGoToAlbum,
             modifier = Modifier.weight(1f),
         )
         Row(
@@ -49,14 +55,16 @@ internal fun FullPlayerTrackInfo(
                 iconModifier = Modifier.size(22.dp),
                 buttonSize = 42.dp,
                 containerSize = 34.dp,
+                suppressInteractionIndication = true,
             )
             TrackActionsMenu(
                 onAddToPlaylist = onAddToPlaylist,
                 onRemoveFromPlaylist = null,
-                onGoToArtist = onGoToArtist,
-                onGoToAlbum = onGoToAlbum,
+                onGoToArtist = null,
+                onGoToAlbum = null,
                 buttonSize = 36.dp,
                 iconModifier = Modifier.size(22.dp),
+                suppressButtonIndication = true,
             )
         }
     }
@@ -65,18 +73,36 @@ internal fun FullPlayerTrackInfo(
 @Composable
 private fun FullPlayerTrackText(
     track: Track,
+    onGoToArtist: (() -> Unit)?,
+    onGoToAlbum: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val albumInteractionSource = remember { MutableInteractionSource() }
+    val artistInteractionSource = remember { MutableInteractionSource() }
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
             text = track.title,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = 20.sp,
+                lineHeight = 24.sp,
+            ),
             fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .fillMaxWidth()
+                .then(
+                    if (onGoToAlbum != null) {
+                        Modifier.clickable(
+                            interactionSource = albumInteractionSource,
+                            indication = null,
+                            onClick = onGoToAlbum,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
                 .basicMarquee(),
             maxLines = 1,
             overflow = TextOverflow.Clip,
@@ -87,6 +113,19 @@ private fun FullPlayerTrackText(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (onGoToArtist != null) {
+                        Modifier.clickable(
+                            interactionSource = artistInteractionSource,
+                            indication = null,
+                            onClick = onGoToArtist,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
         )
     }
 }

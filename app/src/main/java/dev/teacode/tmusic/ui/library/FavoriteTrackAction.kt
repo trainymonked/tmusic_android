@@ -22,6 +22,8 @@ internal fun toggleFavoriteTrackAction(
     getTracks: () -> List<Track>,
     setTracks: (List<Track>) -> Unit,
     getSavedAlbums: () -> List<LibraryAlbum>,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     musicRepository: RemoteMusicRepository,
     libraryCacheStore: LibraryCacheStore,
     refreshAccessToken: () -> String?,
@@ -29,6 +31,7 @@ internal fun toggleFavoriteTrackAction(
     mergePlaylistPickerMetadata: (List<Playlist>) -> Unit,
     updateKnownTrackLikedState: (String, Boolean) -> Unit,
     updateTrackDownloadState: (String, DownloadState) -> Unit,
+    onTrackMovedToCache: (String, String?) -> Unit,
     ensureTrackDownloaded: suspend (Track) -> Unit,
     cacheDownloadedAssets: suspend (Track) -> Unit,
     refreshStorageStats: () -> Unit,
@@ -68,6 +71,29 @@ internal fun toggleFavoriteTrackAction(
                 .put("liked", !wasFavorite),
         )
         saveLibraryCache()
+        if (wasFavorite) {
+            scope.launch {
+                runCatching {
+                    cacheDownloadedTrackIfUnretained(
+                        track = track,
+                        playlists = getPlaylists(),
+                        tracks = getTracks(),
+                        offlineAlbumIds = getOfflineAlbumIds(),
+                        albumTracksById = getAlbumTracksById(),
+                        musicRepository = musicRepository,
+                        updateTrackDownloadState = updateTrackDownloadState,
+                        onTrackMovedToCache = onTrackMovedToCache,
+                    )
+                }.onSuccess { movedToCache ->
+                    if (movedToCache) {
+                        refreshStorageStats()
+                        saveLibraryCache()
+                    }
+                }.onFailure { error ->
+                    setLibraryError(error.userMessage())
+                }
+            }
+        }
         return
     }
 
@@ -145,6 +171,26 @@ internal fun toggleFavoriteTrackAction(
                     .updateOrAppendPlaylist(updatedPlaylist)
                 setPlaylists(nextPlaylists)
                 updateKnownTrackLikedState(track.id, track.id in updatedPlaylist.trackIds)
+                if (!shouldBeFavorite) {
+                    runCatching {
+                        cacheDownloadedTrackIfUnretained(
+                            track = track,
+                            playlists = nextPlaylists,
+                            tracks = getTracks(),
+                            offlineAlbumIds = getOfflineAlbumIds(),
+                            albumTracksById = getAlbumTracksById(),
+                            musicRepository = musicRepository,
+                            updateTrackDownloadState = updateTrackDownloadState,
+                            onTrackMovedToCache = onTrackMovedToCache,
+                        )
+                    }.onSuccess { movedToCache ->
+                        if (movedToCache) {
+                            refreshStorageStats()
+                        }
+                    }.onFailure { error ->
+                        setLibraryError(error.userMessage())
+                    }
+                }
                 libraryCacheStore.saveLibrary(
                     playlists = nextPlaylists,
                     tracks = getTracks(),
@@ -176,6 +222,38 @@ internal fun toggleFavoriteTrackAction(
             setFavoriteSyncTrackIds(getFavoriteSyncTrackIds() - track.id)
         }
     }
+}
+
+private suspend fun cacheDownloadedTrackIfUnretained(
+    track: Track,
+    playlists: List<Playlist>,
+    tracks: List<Track>,
+    offlineAlbumIds: Set<String>,
+    albumTracksById: Map<String, List<Track>>,
+    musicRepository: RemoteMusicRepository,
+    updateTrackDownloadState: (String, DownloadState) -> Unit,
+    onTrackMovedToCache: (String, String?) -> Unit,
+): Boolean {
+    val knownTrack = tracks.firstOrNull { item -> item.id == track.id } ?: track
+    if (knownTrack.downloadState != DownloadState.Downloaded) {
+        return false
+    }
+    val requiredByPlaylist = playlists.any { playlist ->
+        playlist.isOfflineEnabled && track.id in playlist.trackIds
+    }
+    val requiredByAlbum = offlineAlbumIds.any { albumId ->
+        knownTrack.albumId == albumId ||
+            track.albumId == albumId ||
+            albumTracksById[albumId].orEmpty().any { albumTrack -> albumTrack.id == track.id }
+    }
+    if (requiredByPlaylist || requiredByAlbum) {
+        return false
+    }
+
+    musicRepository.removeDownloadedTrack(track.id)
+    updateTrackDownloadState(track.id, DownloadState.NotDownloaded)
+    onTrackMovedToCache(track.id, musicRepository.cachedPlaybackUrl(track.id))
+    return true
 }
 
 private fun currentFavoriteState(

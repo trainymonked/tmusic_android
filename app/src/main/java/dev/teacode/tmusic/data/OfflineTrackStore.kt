@@ -48,6 +48,33 @@ class OfflineTrackStore(context: Context) {
         tracksDirectory.listFiles()?.forEach { file -> file.delete() }
     }
 
+    suspend fun removeDownloadsExcept(retainedTrackIds: Set<String>) = withContext(Dispatchers.IO) {
+        val retainedPaths = retainedTrackIds.mapNotNull { trackId ->
+            preferences.getString(trackId, null)
+                ?.let { json -> runCatching { JSONObject(json).toManifest() }.getOrNull() }
+                ?.localPath
+                ?.let(::File)
+                ?.absolutePath
+        }.toSet()
+        val editor = preferences.edit()
+        preferences.all.keys.forEach { trackId ->
+            if (trackId !in retainedTrackIds) {
+                preferences.getString(trackId, null)
+                    ?.let { json -> runCatching { JSONObject(json).toManifest() }.getOrNull() }
+                    ?.localPath
+                    ?.let(::File)
+                    ?.delete()
+                editor.remove(trackId)
+            }
+        }
+        tracksDirectory.listFiles()?.forEach { file ->
+            if (file.absolutePath !in retainedPaths) {
+                file.delete()
+            }
+        }
+        editor.apply()
+    }
+
     suspend fun moveToCache(trackId: String, maxCacheBytes: Long) = withContext(Dispatchers.IO) {
         val source = manifest(trackId)?.localPath?.let(::File)
         cacheDirectory.mkdirs()

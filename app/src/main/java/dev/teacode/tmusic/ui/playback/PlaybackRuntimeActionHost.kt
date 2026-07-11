@@ -13,6 +13,7 @@ internal class PlaybackRuntimeActionHost(
     private val scope: CoroutineScope,
     private val getExoPlayer: () -> ExoPlayer,
     private val setExoPlayer: (ExoPlayer) -> Unit,
+    private val resolvePlaybackMediaCacheKey: (String, String) -> String?,
     private val musicRepository: RemoteMusicRepository,
     private val authRepository: RemoteAuthRepository,
     private val getAccount: () -> Account?,
@@ -43,6 +44,10 @@ internal class PlaybackRuntimeActionHost(
     private val setPrefetchedPlaybackUrls: (Map<String, String>) -> Unit,
     private val getPlaybackUrlPrefetchesInProgress: () -> Set<String>,
     private val setPlaybackUrlPrefetchesInProgress: (Set<String>) -> Unit,
+    private val getNextTrackPrefetchJob: () -> Job?,
+    private val setNextTrackPrefetchJob: (Job?) -> Unit,
+    private val nextTrackPrefetchSerial: () -> Long,
+    private val isNextTrackPrefetchCurrent: (Long) -> Boolean,
     private val canUseMediaServerRequests: () -> Boolean,
     private val setAccessToken: (String?) -> Unit,
     private val setPlaybackBufferedFraction: (Float) -> Unit,
@@ -112,6 +117,7 @@ internal class PlaybackRuntimeActionHost(
             nextIndex = nextIndex,
             nextUrl = nextUrl,
             exoPlayer = getExoPlayer(),
+            resolvePlaybackMediaCacheKey = resolvePlaybackMediaCacheKey,
             getPlayerState = getPlayerState,
             getGaplessPlaybackRequest = getGaplessPlaybackRequest,
             getGaplessMediaQueueIndices = getGaplessMediaQueueIndices,
@@ -150,9 +156,14 @@ internal class PlaybackRuntimeActionHost(
     }
 
     fun prefetchNextTrackUrl(queue: PlaybackQueue) {
-        prefetchNextTrackUrlAction(
+        val requestSerial = nextTrackPrefetchSerial()
+        getNextTrackPrefetchJob()?.cancel()
+        setPlaybackUrlPrefetchesInProgress(emptySet())
+        val job = prefetchNextTrackUrlAction(
             scope = scope,
             queue = queue,
+            requestSerial = requestSerial,
+            isRequestCurrent = isNextTrackPrefetchCurrent,
             getAccount = getAccount,
             getRepeatMode = getRepeatMode,
             getPrefetchedPlaybackUrls = getPrefetchedPlaybackUrls,
@@ -167,6 +178,14 @@ internal class PlaybackRuntimeActionHost(
             authRepository = authRepository,
             setAccessToken = setAccessToken,
         )
+        setNextTrackPrefetchJob(job)
+    }
+
+    fun cancelNextTrackPrefetch() {
+        nextTrackPrefetchSerial()
+        getNextTrackPrefetchJob()?.cancel()
+        setNextTrackPrefetchJob(null)
+        setPlaybackUrlPrefetchesInProgress(emptySet())
     }
 
     fun nextCrossfadeQueueIndex(queue: PlaybackQueue): Int? {
@@ -208,7 +227,7 @@ internal class PlaybackRuntimeActionHost(
     }
 
     fun seekPreparedQueueMediaItem(targetIndex: Int, direction: Int): Boolean {
-        return seekPreparedQueueMediaItemAction(
+        val moved = seekPreparedQueueMediaItemAction(
             targetIndex = targetIndex,
             direction = direction,
             exoPlayer = getExoPlayer(),
@@ -226,6 +245,10 @@ internal class PlaybackRuntimeActionHost(
             setPlaybackBufferedFraction = setPlaybackBufferedFraction,
             incrementRequestedNextPrefetch = incrementRequestedNextPrefetch,
         )
+        if (moved) {
+            cancelNextTrackPrefetch()
+        }
+        return moved
     }
 
     fun applyPlaybackQueueOrderWithoutInterrupt(nextQueue: PlaybackQueue) {

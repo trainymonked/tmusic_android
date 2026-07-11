@@ -3,7 +3,6 @@ package dev.teacode.tmusic.ui
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.runtime.Composable
 import androidx.compose.material3.MaterialTheme
 import dev.teacode.tmusic.data.AppUpdateInfo
@@ -36,7 +35,7 @@ internal fun ProfileAppearanceSection(
     ProfileSettingsSection(title = "Appearance") {
         ProfileThemeModeRow(
             title = "Theme",
-            subtitle = "Dark, light, or system",
+            subtitle = "",
             selectedMode = themeMode,
             onModeSelected = onThemeModeChange,
         )
@@ -45,19 +44,28 @@ internal fun ProfileAppearanceSection(
 
 @Composable
 internal fun ProfilePlaybackSection(
-    showLyrics: Boolean,
+    showOnlyActiveSyncedLyrics: Boolean,
+    centerSyncedLyrics: Boolean,
     crossfadeSeconds: Int,
     equalizerAvailable: Boolean,
-    onShowLyricsChange: (Boolean) -> Unit,
+    onShowOnlyActiveSyncedLyricsChange: (Boolean) -> Unit,
+    onCenterSyncedLyricsChange: (Boolean) -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit,
     onOpenEqualizer: () -> Unit,
 ) {
     ProfileSettingsSection(title = "Playback") {
         ProfileSwitchRow(
-            title = "Show lyrics",
-            subtitle = "Display lyrics in the full player",
-            checked = showLyrics,
-            onCheckedChange = onShowLyricsChange,
+            title = "Current lyric only (beta)",
+            subtitle = "",
+            checked = showOnlyActiveSyncedLyrics,
+            onCheckedChange = onShowOnlyActiveSyncedLyricsChange,
+        )
+        ProfileSettingDivider()
+        ProfileSwitchRow(
+            title = "Center synced lyrics",
+            subtitle = "",
+            checked = centerSyncedLyrics,
+            onCheckedChange = onCenterSyncedLyricsChange,
         )
         ProfileSettingDivider()
         ProfileSliderRow(
@@ -92,7 +100,7 @@ internal fun ProfileDownloadsSection(
     ProfileSettingsSection(title = "Downloads") {
         ProfileSwitchRow(
             title = "Download using cellular",
-            subtitle = "Applies only to the downloads",
+            subtitle = "",
             checked = downloadUsingCellular,
             onCheckedChange = onDownloadUsingCellularChange,
         )
@@ -119,16 +127,17 @@ internal fun ProfileDownloadsSection(
 internal fun ProfileConnectionSection(
     useLocalBackend: Boolean,
     showLocalBackendOption: Boolean,
-    canUseNetwork: Boolean,
     syncMode: SyncMode,
     offlineOnly: Boolean,
     onUseLocalBackendChange: (Boolean) -> Unit,
     onOfflineOnlyChange: (Boolean) -> Unit,
 ) {
+    val statusLabel = syncMode.connectionStatusLabel()
+    val isOnline = statusLabel == "Online"
     ProfileSettingsSection(title = "Connection") {
         ProfileSwitchRow(
             title = "Offline only",
-            subtitle = "Don't contact the server while enabled",
+            subtitle = "",
             checked = offlineOnly,
             onCheckedChange = onOfflineOnlyChange,
         )
@@ -136,7 +145,7 @@ internal fun ProfileConnectionSection(
         if (showLocalBackendOption) {
             ProfileSwitchRow(
                 title = "Local server",
-                subtitle = "Use the local development backend",
+                subtitle = "",
                 checked = useLocalBackend,
                 onCheckedChange = onUseLocalBackendChange,
             )
@@ -144,16 +153,12 @@ internal fun ProfileConnectionSection(
         }
         ProfileStatusRow(
             title = "Status",
-            value = syncMode.profileLabel(canUseNetwork),
-            icon = when {
-                syncMode == SyncMode.Syncing -> Icons.Filled.Sync
-                syncMode == SyncMode.Online && canUseNetwork -> Icons.Filled.CloudDone
-                else -> Icons.Filled.CloudOff
-            },
-            iconColor = when {
-                syncMode == SyncMode.Syncing -> MaterialTheme.colorScheme.tertiary
-                syncMode == SyncMode.Online && canUseNetwork -> androidx.compose.ui.graphics.Color(0xFF34A853)
-                else -> MaterialTheme.colorScheme.error
+            value = statusLabel,
+            icon = if (isOnline) Icons.Filled.CloudDone else Icons.Filled.CloudOff,
+            iconColor = if (isOnline) {
+                androidx.compose.ui.graphics.Color(0xFF34A853)
+            } else {
+                MaterialTheme.colorScheme.error
             },
         )
     }
@@ -188,13 +193,4 @@ private fun AppUpdateInfo.subtitle(): String {
         .map { it.trim().trimStart('-', '*').trim() }
         .firstOrNull { it.isNotBlank() }
     return firstChangeLine?.take(120) ?: "New version is ready to install"
-}
-
-private fun SyncMode.profileLabel(canUseNetwork: Boolean): String {
-    return when (this) {
-        SyncMode.Offline -> "Offline"
-        SyncMode.Syncing -> "Syncing"
-        SyncMode.Online -> if (canUseNetwork) "Online" else "Offline"
-        SyncMode.OfflineOnly -> "Offline only"
-    }
 }

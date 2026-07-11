@@ -245,7 +245,7 @@ internal fun deletePlaylistDownloadAction(
     scope.launch {
         playlistDownloadJobs[playlist.id]?.cancel()
         setPlaylistDownloadJobs(playlistDownloadJobs - playlist.id)
-        collectionDownloadPauseRegistry.pausePlaylist(playlist.id)
+        collectionDownloadPauseRegistry.resumePlaylist(playlist.id)
         val currentPlaylist = playlists.firstOrNull { it.id == playlist.id } ?: playlist
         val nextPlaylists = playlists.updatePlaylist(
             updatedPlaylist = currentPlaylist.copy(isOfflineEnabled = false),
@@ -303,7 +303,7 @@ internal fun deleteAlbumDownloadAction(
     scope.launch {
         albumDownloadJobs[album.id]?.cancel()
         setAlbumDownloadJobs(albumDownloadJobs - album.id)
-        collectionDownloadPauseRegistry.pauseAlbum(album.id)
+        collectionDownloadPauseRegistry.resumeAlbum(album.id)
         updateAlbumOfflineFlag(album.id, false)
         val nextOfflineAlbumIds = offlineAlbumIds - album.id
         val deletePlan = albumDownloadDeletePlan(

@@ -2,6 +2,7 @@ package dev.teacode.tmusic.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -40,6 +41,18 @@ internal fun TMusicAppLifecycleEffects(
         setOfflineOnlySyncMode = { appState.syncMode = SyncMode.OfflineOnly },
         clearLibraryError = { appState.libraryError = null },
     )
+    LaunchedEffect(
+        appState.account?.id,
+        appState.syncMode,
+        appState.offlineOnly,
+        appState.downloadUsingCellular,
+    ) {
+        if (canUseNetworkForCollectionDownloads()) {
+            resumePendingOfflineDownloads()
+        } else {
+            pauseCollectionDownloadsForNetworkPolicy()
+        }
+    }
     ObserveNetworkConnectivity(
         enabled = appState.account != null && !appState.offlineOnly,
         useLocalBackend = appState.useLocalBackend,
@@ -50,16 +63,20 @@ internal fun TMusicAppLifecycleEffects(
                 pauseCollectionDownloadsForNetworkPolicy()
             }
         },
-        onDisconnected = {
-            if (appState.account != null && !appState.offlineOnly) {
+        onConnectionStateChanged = { connected ->
+            if (appState.account != null && !appState.offlineOnly && !connected) {
                 appState.syncMode = SyncMode.Offline
             }
         },
-        onReconnected = {
-            if (appState.account != null && !appState.offlineOnly && appState.libraryLoadJob == null) {
+        onNetworkAvailableOrChanged = {
+            if (appState.account != null && !appState.offlineOnly) {
                 loadLibrary()
             }
-            if (appState.account != null && !appState.offlineOnly) {
+            if (
+                appState.account != null &&
+                !appState.offlineOnly &&
+                appState.syncMode != SyncMode.Offline
+            ) {
                 scope.launch {
                     checkForAppUpdate(false)
                 }

@@ -78,7 +78,7 @@ fun AlbumsScreen(
                         onClick = { onSelectAlbum(album) },
                     )
                 }
-                if (isLoadingMore) {
+                if (isLoadingMore && !isRefreshing) {
                     item {
                         LinearProgressIndicator(
                             modifier = Modifier

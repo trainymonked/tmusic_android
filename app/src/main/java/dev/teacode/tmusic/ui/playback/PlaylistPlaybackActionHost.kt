@@ -132,14 +132,20 @@ internal class PlaylistPlaybackActionHost(
             playlist = currentPlaylist,
             playlistTracks = knownPlaylistTracks,
             existingQueueTracks = getPlaybackQueue().tracks,
+            canUseServerRequests = canUseServerRequests,
             nextRequestSerial = nextQueueStartRequestSerial,
             setShuffleEnabled = {
                 setShuffleEnabled(true)
                 userSetShuffleEnabled(true)
             },
             playQueue = { track, queue, index -> playQueuedTrack(track, queue, index) },
+            resolveTracks = { currentPlaylist, fallbackTracks ->
+                resolvePlaylistTracksForPlayback(currentPlaylist, fallbackTracks)
+            },
             isRequestCurrent = { it == queueStartRequestSerial.get() },
             replaceQueue = replacePlaybackQueueSnapshotIfRequestCurrent,
+            markServerUnavailable = markServerUnavailable,
+            setPlayerError = setPlayerError,
         )
     }
 }

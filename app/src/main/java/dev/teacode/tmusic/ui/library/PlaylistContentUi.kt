@@ -210,6 +210,7 @@ internal fun PlaylistContent(
                 ) { index, item ->
                     val track = item.track
                     val itemKey = "${item.playlistTrackId ?: track.id}:$index"
+                    val isPlayable = track.id in playableTrackIds
                     TrackRow(
                         track = track,
                         artworkBitmap = artworkBitmaps.artworkBitmap(track.listArtworkKey(), ArtworkImageSize.TrackList),
@@ -231,7 +232,7 @@ internal fun PlaylistContent(
                             null
                         },
                         downloadBadgePlacement = DownloadBadgePlacement.BeforeTitle,
-                        enabled = true,
+                        enabled = isPlayable,
                         modifier = Modifier
                             .zIndex(if (draggedKey == itemKey) 1f else 0f)
                             .graphicsLayer { translationY = if (draggedKey == itemKey) dragOffset else 0f }
@@ -275,7 +276,7 @@ internal fun PlaylistContent(
                             ),
                     )
                 }
-                if (isLoadingMore) {
+                if (isLoadingMore && !isRefreshing) {
                     item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
                 }
             }

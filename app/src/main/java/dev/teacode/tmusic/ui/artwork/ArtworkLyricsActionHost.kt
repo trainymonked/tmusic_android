@@ -44,7 +44,6 @@ internal class ArtworkLyricsActionHost(
     private val setLyricsUnavailableIds: (Set<String>) -> Unit,
     private val getLyricsLoadsInProgress: () -> Set<String>,
     private val setLyricsLoadsInProgress: (Set<String>) -> Unit,
-    private val getShowLyrics: () -> Boolean,
     private val setAccessToken: (String?) -> Unit,
     private val setCacheSizeBytes: (Long) -> Unit,
     private val setLibraryError: (String?) -> Unit,
@@ -82,6 +81,30 @@ internal class ArtworkLyricsActionHost(
         )
     }
 
+    private suspend fun refreshArtworkCache(
+        artworkKey: String,
+        imageSize: ArtworkImageSize,
+    ): ImageBitmap? {
+        return cacheArtworkAction(
+            artworkKey = artworkKey,
+            imageSize = imageSize,
+            artworkCacheStore = artworkCacheStore,
+            libraryCacheStore = libraryCacheStore,
+            musicRepository = musicRepository,
+            canUseMediaServerRequests = canUseMediaServerRequests,
+            getArtists = getArtists,
+            getSearchResults = getSearchResults,
+            getSimilarArtistsByArtist = getSimilarArtistsByArtist,
+            getPlaylists = getPlaylists,
+            getTracks = getTracks,
+            getArtworkLoadsInProgress = getArtworkLoadsInProgress,
+            refreshAccessToken = authRepository::accessToken,
+            setAccessToken = setAccessToken,
+            setCacheSizeBytes = setCacheSizeBytes,
+            forceRefresh = true,
+        )
+    }
+
     fun loadArtwork(
         artworkKey: String,
         imageSize: ArtworkImageSize = ArtworkImageSize.AlbumGrid,
@@ -99,11 +122,29 @@ internal class ArtworkLyricsActionHost(
         )
     }
 
+    fun refreshArtwork(
+        artworkKey: String,
+        imageSize: ArtworkImageSize = ArtworkImageSize.AlbumGrid,
+    ) {
+        refreshArtworkAction(
+            scope = scope,
+            artworkKey = artworkKey,
+            imageSize = imageSize,
+            canUseMediaServerRequests = canUseMediaServerRequests,
+            artworkCacheStore = artworkCacheStore,
+            getArtworkBitmaps = getArtworkBitmaps,
+            setArtworkBitmaps = setArtworkBitmaps,
+            getArtworkLoadsInProgress = getArtworkLoadsInProgress,
+            setArtworkLoadsInProgress = setArtworkLoadsInProgress,
+            refreshArtwork = ::refreshArtworkCache,
+            disableMediaPlaybackForAccount = disableMediaPlaybackForAccount,
+        )
+    }
+
     fun loadLyrics(track: Track) {
         loadLyricsAction(
             scope = scope,
             track = track,
-            showLyrics = getShowLyrics(),
             getLyricsByTrackId = getLyricsByTrackId,
             setLyricsByTrackId = setLyricsByTrackId,
             getLyricsUnavailableIds = getLyricsUnavailableIds,

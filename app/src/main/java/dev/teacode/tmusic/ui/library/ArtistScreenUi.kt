@@ -6,11 +6,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -24,13 +27,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
@@ -64,6 +72,10 @@ fun ArtistScreen(
     onSelectTrack: (Track) -> Unit,
 ) {
     val totalItems = albums.size + appearsOn.size + looseTracks.size
+    val artistCoverKey = artist?.let(::artistArtworkKey)
+    LaunchedEffect(artistCoverKey) {
+        artistCoverKey?.let { artworkKey -> onRequestArtwork(artworkKey, ArtworkImageSize.AlbumGrid) }
+    }
     SwipeRefreshContainer(
         enabled = artist != null,
         isRefreshing = isRefreshing,
@@ -76,10 +88,25 @@ fun ArtistScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             item {
-                Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
-                    HeaderBlock(
-                        title = artist?.name ?: "Artist",
-                        subtitle = "",
+                if (artist == null) {
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        HeaderBlock(
+                            title = "Artist",
+                            subtitle = "",
+                        )
+                    }
+                } else {
+                    ArtistHeader(
+                        artist = artist,
+                        artworkBitmap = artworkBitmaps.artworkBitmap(
+                            artistCoverKey,
+                            ArtworkImageSize.AlbumGrid,
+                        ),
+                        modifier = Modifier.padding(
+                            start = ScreenHorizontalPadding,
+                            end = ScreenHorizontalPadding,
+                            bottom = 8.dp,
+                        ),
                     )
                 }
             }
@@ -96,7 +123,7 @@ fun ArtistScreen(
                         EmptyState("Artist was not found")
                     }
                 }
-            } else if (isLoading && totalItems == 0) {
+            } else if (isLoading && totalItems == 0 && !isRefreshing) {
                 item {
                     LinearProgressIndicator(
                         modifier = Modifier
@@ -104,7 +131,7 @@ fun ArtistScreen(
                             .padding(horizontal = ScreenHorizontalPadding),
                     )
                 }
-            } else if (totalItems == 0) {
+            } else if (totalItems == 0 && !isRefreshing) {
                 item {
                     Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
                         EmptyState("No music found for this artist")
@@ -221,6 +248,47 @@ fun ArtistScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ArtistHeader(
+    artist: LibraryArtist,
+    artworkBitmap: ImageBitmap?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(Color(stableUiColor(artist.name))),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (artworkBitmap != null) {
+                Image(
+                    bitmap = artworkBitmap,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Text(
+                    text = artist.name.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

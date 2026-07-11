@@ -23,7 +23,7 @@ fun LoadMoreEffect(
         }
     }
 
-    LaunchedEffect(shouldLoadMore) {
+    LaunchedEffect(shouldLoadMore, itemCount) {
         if (shouldLoadMore) {
             onLoadMore()
         }

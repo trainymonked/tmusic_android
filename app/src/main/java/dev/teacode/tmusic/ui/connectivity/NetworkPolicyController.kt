@@ -45,6 +45,7 @@ internal class NetworkPolicyController(
         return canCheckAppUpdates(
             account = appState.account,
             offlineOnly = appState.offlineOnly,
+            syncMode = appState.syncMode,
             hasNetworkConnection = hasNetworkConnection(),
         )
     }
@@ -88,4 +89,3 @@ internal class NetworkPolicyController(
         }
     }
 }
-

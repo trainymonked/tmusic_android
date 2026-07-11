@@ -32,6 +32,7 @@ internal fun PlayerOverlayHost(
     currentLyricsLoading: Boolean,
     playerSourceLabel: String?,
     playerSourceDetail: String?,
+    onOpenPlayerSource: (() -> Unit)?,
     currentTrackFavorite: Boolean,
     canPlayRemoteTracks: Boolean,
     offlineAvailableTrackIds: Set<String>,
@@ -113,6 +114,7 @@ internal fun PlayerOverlayHost(
                 lyricsLoading = currentLyricsLoading,
                 sourceLabel = playerSourceLabel,
                 sourceDetail = playerSourceDetail,
+                onOpenSource = onOpenPlayerSource,
                 onSkipPrevious = onSkipPrevious,
                 onSkipNext = onSkipNext,
                 onSwipePrevious = onSwipePrevious,
@@ -123,7 +125,6 @@ internal fun PlayerOverlayHost(
                 onAddToPlaylist = onAddCurrentTrackToPlaylist,
                 onGoToArtist = playerState.currentTrack?.let { track ->
                     {
-                        onCloseFullPlayer()
                         onGoToTrackArtist(track)
                     }
                 },

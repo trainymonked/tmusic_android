@@ -53,6 +53,7 @@ fun LibraryScreen(
     listState: LazyListState,
     isRefreshing: Boolean,
     offlineOnly: Boolean,
+    offlineNotice: String?,
     onRefresh: () -> Unit,
     onRequestArtwork: (String, ArtworkImageSize) -> Unit,
     onSelectAlbum: (LibraryAlbum) -> Unit,
@@ -111,6 +112,13 @@ fun LibraryScreen(
                             imageVector = Icons.Filled.Add,
                             contentDescription = "Create playlist",
                         )
+                    }
+                }
+            }
+            if (!offlineNotice.isNullOrBlank()) {
+                item {
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding)) {
+                        OfflineNotice(offlineNotice)
                     }
                 }
             }

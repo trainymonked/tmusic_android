@@ -64,6 +64,7 @@ internal class OfflineSettingsActionHost(
             setLibraryError(null)
             setLibraryNotice(null)
         } else if (getAccountAvailable()) {
+            setSyncMode(SyncMode.Offline)
             loadLibrary()
         }
     }

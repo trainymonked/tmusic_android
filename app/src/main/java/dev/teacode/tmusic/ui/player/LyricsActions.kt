@@ -13,7 +13,6 @@ import kotlinx.coroutines.launch
 internal fun loadLyricsAction(
     scope: CoroutineScope,
     track: Track,
-    showLyrics: Boolean,
     getLyricsByTrackId: () -> Map<String, TrackLyrics>,
     setLyricsByTrackId: (Map<String, TrackLyrics>) -> Unit,
     getLyricsUnavailableIds: () -> Set<String>,
@@ -28,9 +27,6 @@ internal fun loadLyricsAction(
     disableMediaPlaybackForAccount: () -> Unit,
     markServerUnavailable: (Throwable) -> Unit,
 ) {
-    if (!showLyrics) {
-        return
-    }
     if (
         track.id in getLyricsByTrackId() ||
         track.id in getLyricsUnavailableIds() ||

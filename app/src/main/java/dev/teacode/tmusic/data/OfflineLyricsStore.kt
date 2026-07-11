@@ -25,6 +25,16 @@ class OfflineLyricsStore(context: Context) {
         preferences.edit().clear().apply()
     }
 
+    fun clearExcept(retainedTrackIds: Set<String>) {
+        val editor = preferences.edit()
+        preferences.all.keys.forEach { trackId ->
+            if (trackId !in retainedTrackIds) {
+                editor.remove(trackId)
+            }
+        }
+        editor.apply()
+    }
+
     fun sizeBytes(): Long {
         return preferences.all.values
             .filterIsInstance<String>()

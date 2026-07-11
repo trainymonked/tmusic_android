@@ -66,6 +66,7 @@ internal fun createLibraryDetailController(
     musicRepository: RemoteMusicRepository,
     authRepository: RemoteAuthRepository,
     canAttemptMetadataRequest: () -> Boolean,
+    hasNetworkConnection: () -> Boolean,
     canUseServerRequests: () -> Boolean,
     playlistIsFullyDownloaded: (dev.teacode.tmusic.domain.Playlist) -> Boolean,
     applyPlaylistTrackPage: (
@@ -80,6 +81,7 @@ internal fun createLibraryDetailController(
     musicRepository = musicRepository,
     authRepository = authRepository,
     canAttemptMetadataRequest = canAttemptMetadataRequest,
+    hasNetworkConnection = hasNetworkConnection,
     canUseServerRequests = canUseServerRequests,
     getSyncMode = { appState.syncMode },
     setSyncMode = { appState.syncMode = it },

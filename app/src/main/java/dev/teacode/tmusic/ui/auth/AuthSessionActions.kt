@@ -92,8 +92,8 @@ internal suspend fun signOutLocalSessionAction(
     setLibraryLoadSerial(getLibraryLoadSerial() + 1)
     getLibraryLoadJob()?.cancel()
     setLibraryLoadJob(null)
-    authRepository.signOut()
-    googleSignInTokenProvider.signOut()
+    runCatching { authRepository.signOut() }
+    runCatching { googleSignInTokenProvider.signOut() }
     libraryCacheStore.clear()
     playbackStateStore.clear()
     pendingPlayEventStore.clear()

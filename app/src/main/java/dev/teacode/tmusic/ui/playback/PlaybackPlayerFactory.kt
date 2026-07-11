@@ -26,8 +26,8 @@ import kotlinx.coroutines.isActive
 internal const val GAPLESS_PRELOAD_DURATION_US = 20L * C.MICROS_PER_SECOND
 private const val PLAYBACK_MIN_BUFFER_MS = 45_000
 private const val PLAYBACK_MAX_BUFFER_MS = 30 * 60 * 1000
-private const val PLAYBACK_START_BUFFER_MS = 750
-private const val PLAYBACK_RESUME_BUFFER_MS = 1_500
+private const val PLAYBACK_START_BUFFER_MS = 2_500
+private const val PLAYBACK_RESUME_BUFFER_MS = 5_000
 
 internal data class PreparedCrossfade(
     val player: ExoPlayer,
@@ -91,7 +91,7 @@ internal fun createPlaybackPlayer(
             setPauseAtEndOfMediaItems(false)
             setPreloadConfiguration(ExoPlayer.PreloadConfiguration(GAPLESS_PRELOAD_DURATION_US))
             setHandleAudioBecomingNoisy(true)
-            setWakeMode(C.WAKE_MODE_LOCAL)
+            setWakeMode(C.WAKE_MODE_NETWORK)
         }
 }
 
@@ -108,6 +108,7 @@ internal fun ExoPlayer.configurePlaybackAudioFocus(handleAudioFocus: Boolean) {
 internal fun ExoPlayer.prepareCrossfadeItem(
     url: String,
     mediaId: String,
+    cacheKey: String?,
 ) {
     stop()
     clearMediaItems()
@@ -119,6 +120,9 @@ internal fun ExoPlayer.prepareCrossfadeItem(
         MediaItem.Builder()
             .setUri(url)
             .setMediaId(mediaId)
+            .apply {
+                cacheKey?.let { resolvedCacheKey -> setCustomCacheKey(resolvedCacheKey) }
+            }
             .build(),
         true,
     )

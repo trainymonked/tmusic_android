@@ -77,6 +77,7 @@ fun FullPlayerScreen(
     lyricsLoading: Boolean,
     sourceLabel: String?,
     sourceDetail: String?,
+    onOpenSource: (() -> Unit)?,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
     onSwipePrevious: () -> Unit,
@@ -403,6 +404,7 @@ fun FullPlayerScreen(
                 lyricsLoading = lyricsLoading,
                 sourceLabel = sourceLabel,
                 sourceDetail = sourceDetail,
+                onOpenSource = onOpenSource,
                 progressSeconds = progressSeconds,
                 durationSeconds = durationSeconds,
                 isFavorite = isFavorite,
@@ -448,6 +450,7 @@ private fun FullPlayerCurrentContent(
     lyricsLoading: Boolean,
     sourceLabel: String?,
     sourceDetail: String?,
+    onOpenSource: (() -> Unit)?,
     progressSeconds: Int,
     durationSeconds: Int,
     isFavorite: Boolean,
@@ -474,13 +477,14 @@ private fun FullPlayerCurrentContent(
         modifier = modifier
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         FullPlayerSourceHeader(
             sourceLabel = sourceLabel,
             sourceDetail = sourceDetail,
+            onOpenSource = onOpenSource,
         )
         FullPlayerArtworkSection(
             track = track,
@@ -489,6 +493,7 @@ private fun FullPlayerCurrentContent(
             lyrics = lyrics,
             lyricsUnavailable = lyricsUnavailable,
             lyricsLoading = lyricsLoading,
+            isPlaying = playerState.isPlaying,
             progressSeconds = progressSeconds,
             onRefreshLyrics = onRefreshLyrics,
             onSeek = onSeek,
@@ -534,13 +539,27 @@ private fun FullPlayerCurrentContent(
 private fun FullPlayerSourceHeader(
     sourceLabel: String?,
     sourceDetail: String?,
+    onOpenSource: (() -> Unit)?,
 ) {
     if (sourceLabel == null) {
         Spacer(modifier = Modifier.fillMaxWidth())
         return
     }
+    val interactionSource = remember { MutableInteractionSource() }
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onOpenSource != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onOpenSource,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {

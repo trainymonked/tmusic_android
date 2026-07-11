@@ -49,7 +49,6 @@ internal fun createArtworkLyricsController(
     setLyricsUnavailableIds = { appState.lyricsUnavailableIds = it },
     getLyricsLoadsInProgress = { appState.lyricsLoadsInProgress },
     setLyricsLoadsInProgress = { appState.lyricsLoadsInProgress = it },
-    getShowLyrics = { appState.showLyrics },
     setAccessToken = { appState.accessToken = it },
     setCacheSizeBytes = { appState.cacheSizeBytes = it },
     setLibraryError = { appState.libraryError = it },
@@ -66,4 +65,3 @@ internal fun createArtworkLyricsController(
     getProfileAvatarBitmap = { appState.profileAvatarBitmap },
     setProfileAvatarBitmap = { appState.profileAvatarBitmap = it },
 )
-

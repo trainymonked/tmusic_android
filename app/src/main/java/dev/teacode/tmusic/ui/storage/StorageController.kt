@@ -30,8 +30,23 @@ internal class StorageController(
     fun refreshStorageStats() {
         scope.launch {
             val retainedArtworkKeys = downloadedArtworkCacheKeys(appState.playlists, appState.tracks)
-            val retainedTrackIds = setOfNotNull(appState.playerState.currentTrack?.id)
-            val retainedPlaybackCacheKeys = setOfNotNull(appState.playerState.streamUrl)
+            val retainedTrackIds = if (appState.playerState.isPlaying) {
+                setOfNotNull(appState.playerState.currentTrack?.id)
+            } else {
+                emptySet()
+            }
+            val retainedPlaybackCacheKeys = if (appState.playerState.isPlaying) {
+                buildSet {
+                    appState.playerState.streamUrl?.let { streamUrl ->
+                        add(streamUrl)
+                        appState.playerState.currentTrack?.id
+                            ?.let { trackId -> mediaCache.resolvePlaybackMediaCacheKey(trackId, streamUrl) }
+                            ?.let { cacheKey -> add(cacheKey) }
+                    }
+                }
+            } else {
+                emptySet()
+            }
             appState.downloadedSizeBytes = musicRepository.downloadsSizeBytes() +
                 offlineLyricsStore.sizeBytes() +
                 artworkCacheStore.sizeBytesFor(retainedArtworkKeys)

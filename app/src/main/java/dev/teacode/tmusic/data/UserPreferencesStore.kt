@@ -70,13 +70,23 @@ class UserPreferencesStore(context: Context) {
             .apply()
     }
 
-    fun showLyrics(): Boolean {
-        return preferences.getBoolean(KEY_SHOW_LYRICS, true)
+    fun showOnlyActiveSyncedLyrics(): Boolean {
+        return preferences.getBoolean(KEY_SHOW_ONLY_ACTIVE_SYNCED_LYRICS, true)
     }
 
-    fun setShowLyrics(enabled: Boolean) {
+    fun setShowOnlyActiveSyncedLyrics(enabled: Boolean) {
         preferences.edit()
-            .putBoolean(KEY_SHOW_LYRICS, enabled)
+            .putBoolean(KEY_SHOW_ONLY_ACTIVE_SYNCED_LYRICS, enabled)
+            .apply()
+    }
+
+    fun centerSyncedLyrics(): Boolean {
+        return preferences.getBoolean(KEY_CENTER_SYNCED_LYRICS, false)
+    }
+
+    fun setCenterSyncedLyrics(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_CENTER_SYNCED_LYRICS, enabled)
             .apply()
     }
 
@@ -361,7 +371,8 @@ class UserPreferencesStore(context: Context) {
         const val KEY_SCROBBLING_PAUSED = "scrobbling_paused"
         const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"
         const val KEY_PLAYBACK_REPEAT_MODE = "playback_repeat_mode"
-        const val KEY_SHOW_LYRICS = "show_lyrics"
+        const val KEY_SHOW_ONLY_ACTIVE_SYNCED_LYRICS = "show_only_active_synced_lyrics"
+        const val KEY_CENTER_SYNCED_LYRICS = "center_synced_lyrics"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_DOWNLOAD_USING_CELLULAR = "download_using_cellular"
         const val KEY_CROSSFADE_SECONDS = "crossfade_seconds"
@@ -378,7 +389,7 @@ class UserPreferencesStore(context: Context) {
         const val KEY_RECENT_LIBRARY_ITEMS = "recent_library_items"
         const val MAX_RECENT_SEARCHES = 8
         const val MAX_CROSSFADE_SECONDS = 12
-        const val DEFAULT_THEME_MODE = "dark"
+        const val DEFAULT_THEME_MODE = "system"
         const val UPDATE_CHECK_SOURCE_GITHUB_RELEASES = "server_policy"
     }
 }

@@ -10,6 +10,7 @@ import dev.teacode.tmusic.domain.LibrarySearchResults
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal suspend fun cachedArtworkBitmapAction(
@@ -39,11 +40,18 @@ internal suspend fun cacheArtworkAction(
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
     setCacheSizeBytes: (Long) -> Unit,
+    forceRefresh: Boolean = false,
 ): ImageBitmap? {
-    cachedArtworkBitmapAction(artworkKey, imageSize, artworkCacheStore)?.let { return it }
+    if (!forceRefresh) {
+        cachedArtworkBitmapAction(artworkKey, imageSize, artworkCacheStore)?.let { return it }
+    }
     val cacheKey = artworkCacheKey(artworkKey, imageSize)
-    val cachedPath = artworkCacheStore.cachedPath(cacheKey)
-        ?: artworkCacheStore.cachedPath(legacyArtworkCacheKey(artworkKey, imageSize))
+    val cachedPath = if (forceRefresh) {
+        null
+    } else {
+        artworkCacheStore.cachedPath(cacheKey)
+            ?: artworkCacheStore.cachedPath(legacyArtworkCacheKey(artworkKey, imageSize))
+    }
         ?: run {
             if (!canUseMediaServerRequests()) {
                 return null
@@ -67,7 +75,11 @@ internal suspend fun cacheArtworkAction(
                 else -> musicRepository.artworkUrl(artworkKey)
             }
             setAccessToken(refreshAccessToken())
-            artworkCacheStore.cache(cacheKey, url)
+            if (forceRefresh) {
+                artworkCacheStore.refresh(cacheKey, url)
+            } else {
+                artworkCacheStore.cache(cacheKey, url)
+            }
         }
     val bitmap = decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
     val downloadedKeys = downloadedArtworkCacheKeys(getPlaylists(), getTracks())
@@ -117,6 +129,72 @@ internal fun loadArtworkAction(
             }
         }
         setArtworkLoadsInProgress(getArtworkLoadsInProgress() - bitmapKey - cacheKey)
+    }
+}
+
+internal fun refreshArtworkAction(
+    scope: CoroutineScope,
+    artworkKey: String,
+    imageSize: ArtworkImageSize,
+    canUseMediaServerRequests: () -> Boolean,
+    artworkCacheStore: ArtworkCacheStore,
+    getArtworkBitmaps: () -> Map<String, ImageBitmap>,
+    setArtworkBitmaps: (Map<String, ImageBitmap>) -> Unit,
+    getArtworkLoadsInProgress: () -> Set<String>,
+    setArtworkLoadsInProgress: (Set<String>) -> Unit,
+    refreshArtwork: suspend (String, ArtworkImageSize) -> ImageBitmap?,
+    disableMediaPlaybackForAccount: () -> Unit,
+) {
+    if (!canUseMediaServerRequests()) {
+        return
+    }
+    val refreshKey = "refresh:$artworkKey"
+    if (refreshKey in getArtworkLoadsInProgress()) {
+        return
+    }
+    setArtworkLoadsInProgress(getArtworkLoadsInProgress() + refreshKey)
+    scope.launch {
+        val bitmapKey = artworkBitmapKey(artworkKey, imageSize)
+        val cacheKey = artworkCacheKey(artworkKey, imageSize)
+        var ownsLoadKeys = false
+        try {
+            while (
+                bitmapKey in getArtworkLoadsInProgress() ||
+                cacheKey in getArtworkLoadsInProgress()
+            ) {
+                delay(25L)
+            }
+            if (!canUseMediaServerRequests()) {
+                return@launch
+            }
+            setArtworkLoadsInProgress(getArtworkLoadsInProgress() + bitmapKey + cacheKey)
+            ownsLoadKeys = true
+            runCatching {
+                refreshArtwork(artworkKey, imageSize)
+            }.onSuccess { bitmap ->
+                if (bitmap != null) {
+                    setArtworkBitmaps(
+                        getArtworkBitmaps()
+                            .filterKeys { existingKey -> artworkSourceKey(existingKey) != artworkKey } +
+                            (bitmapKey to bitmap),
+                    )
+                    artworkCacheStore.clearKeys(
+                        ArtworkImageSize.entries
+                            .mapTo(mutableSetOf()) { size -> legacyArtworkCacheKey(artworkKey, size) }
+                            .apply { remove(cacheKey) },
+                    )
+                }
+            }.onFailure { error ->
+                if (error.isMediaPlaybackDisabledError()) {
+                    disableMediaPlaybackForAccount()
+                }
+            }
+        } finally {
+            val remainingLoads = getArtworkLoadsInProgress() - refreshKey
+            setArtworkLoadsInProgress(
+                if (ownsLoadKeys) remainingLoads - bitmapKey - cacheKey else remainingLoads,
+            )
+        }
     }
 }
 

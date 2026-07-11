@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -33,6 +32,7 @@ internal fun FullPlayerArtworkSection(
     lyrics: TrackLyrics?,
     lyricsUnavailable: Boolean,
     lyricsLoading: Boolean,
+    isPlaying: Boolean,
     progressSeconds: Int,
     onRefreshLyrics: (() -> Unit)?,
     onSeek: (Int) -> Unit,
@@ -53,6 +53,7 @@ internal fun FullPlayerArtworkSection(
             lyrics = lyrics,
             lyricsUnavailable = lyricsUnavailable,
             lyricsLoading = lyricsLoading,
+            isPlaying = isPlaying,
             progressSeconds = progressSeconds,
             onRefreshLyrics = onRefreshLyrics,
             onSeek = onSeek,
@@ -82,6 +83,7 @@ private fun FullPlayerArtworkSectionContent(
     lyrics: TrackLyrics?,
     lyricsUnavailable: Boolean,
     lyricsLoading: Boolean,
+    isPlaying: Boolean,
     progressSeconds: Int,
     onRefreshLyrics: (() -> Unit)?,
     onSeek: (Int) -> Unit,
@@ -100,8 +102,7 @@ private fun FullPlayerArtworkSectionContent(
             placeholderIcon = Icons.Filled.LibraryMusic,
             placeholderIconSize = 78.dp,
             modifier = Modifier
-                .padding(vertical = 2.dp)
-                .fillMaxWidth(if (showLyrics) 0.87f else 0.98f)
+                .fillMaxWidth()
                 .aspectRatio(1f)
                 .onGloballyPositioned { coordinates ->
                     onArtworkBoundsChanged(coordinates.boundsInRoot())
@@ -113,6 +114,7 @@ private fun FullPlayerArtworkSectionContent(
                 lyrics = lyrics,
                 lyricsUnavailable = lyricsUnavailable,
                 lyricsLoading = lyricsLoading,
+                isPlaying = isPlaying,
                 progressSeconds = progressSeconds,
                 onRefreshLyrics = onRefreshLyrics,
                 onSeek = onSeek,
@@ -140,8 +142,7 @@ private fun FullPlayerArtworkPreviewContent(
             placeholderIcon = Icons.Filled.LibraryMusic,
             placeholderIconSize = 78.dp,
             modifier = Modifier
-                .padding(vertical = 2.dp)
-                .fillMaxWidth(if (showLyrics) 0.87f else 0.98f)
+                .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(8.dp)),
         )
@@ -149,7 +150,7 @@ private fun FullPlayerArtworkPreviewContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(96.dp),
+                    .height(92.dp),
             )
         }
     }

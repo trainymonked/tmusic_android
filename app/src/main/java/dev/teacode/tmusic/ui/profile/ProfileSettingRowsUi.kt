@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.BorderStroke
@@ -21,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -44,7 +46,7 @@ internal fun ProfileSettingsSection(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 4.dp),
             )
             content()
         }
@@ -70,7 +72,10 @@ internal fun ProfileSwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(
+                horizontal = 16.dp,
+                vertical = if (subtitle.isBlank()) 6.dp else 10.dp,
+            ),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -83,6 +88,10 @@ internal fun ProfileSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             enabled = enabled,
+            modifier = Modifier.graphicsLayer {
+                scaleX = 0.82f
+                scaleY = 0.82f
+            },
         )
     }
 }
@@ -98,7 +107,12 @@ internal fun ProfileActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+            .padding(
+                start = 16.dp,
+                top = if (subtitle.isBlank()) 4.dp else 8.dp,
+                end = 8.dp,
+                bottom = if (subtitle.isBlank()) 4.dp else 8.dp,
+            ),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -122,11 +136,12 @@ internal fun ProfileInfoRow(
     title: String,
     value: String,
     valueTextAlign: TextAlign = TextAlign.Start,
+    valueMaxLines: Int = 2,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -140,7 +155,7 @@ internal fun ProfileInfoRow(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
+            maxLines = valueMaxLines,
             overflow = TextOverflow.Ellipsis,
             textAlign = valueTextAlign,
             modifier = Modifier.weight(1.5f),
@@ -158,7 +173,7 @@ internal fun ProfileStatusRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -198,7 +213,7 @@ internal fun ProfileSliderRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(
@@ -224,6 +239,7 @@ internal fun ProfileSliderRow(
             },
             valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
             steps = (valueRange.last - valueRange.first - 1).coerceAtLeast(0),
+            modifier = Modifier.height(32.dp),
         )
     }
 }
@@ -238,7 +254,10 @@ internal fun ProfileThemeModeRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(
+                horizontal = 16.dp,
+                vertical = if (subtitle.isBlank()) 6.dp else 10.dp,
+            ),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

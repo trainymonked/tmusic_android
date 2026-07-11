@@ -19,7 +19,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,7 +51,8 @@ internal fun ProfileScreen(
     pendingPlayEventSyncProgress: Pair<Int, Int>?,
     waitingForLastFmSession: Boolean,
     scrobblingPaused: Boolean,
-    showLyrics: Boolean,
+    showOnlyActiveSyncedLyrics: Boolean,
+    centerSyncedLyrics: Boolean,
     crossfadeSeconds: Int,
     equalizerAvailable: Boolean,
     offlineOnly: Boolean,
@@ -58,7 +65,8 @@ internal fun ProfileScreen(
     onUseLocalBackendChange: (Boolean) -> Unit,
     onOfflineOnlyChange: (Boolean) -> Unit,
     onScrobblingPausedChange: (Boolean) -> Unit,
-    onShowLyricsChange: (Boolean) -> Unit,
+    onShowOnlyActiveSyncedLyricsChange: (Boolean) -> Unit,
+    onCenterSyncedLyricsChange: (Boolean) -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit,
     onDownloadUsingCellularChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
@@ -72,6 +80,7 @@ internal fun ProfileScreen(
     onSignOut: () -> Unit,
 ) {
     val themeController = LocalAppThemeController.current
+    var pendingConfirmation by remember { mutableStateOf<ProfileConfirmation?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
@@ -81,7 +90,7 @@ internal fun ProfileScreen(
             ProfileHeader(
                 account = account,
                 avatarBitmap = avatarBitmap,
-                onSignOut = onSignOut,
+                onSignOut = { pendingConfirmation = ProfileConfirmation.SignOut },
             )
         }
         appUpdateController.availableUpdate?.let { update ->
@@ -105,7 +114,7 @@ internal fun ProfileScreen(
                 canUseNetwork = canUseNetwork,
                 onConnect = onConnectLastFm,
                 onCompleteSession = onCompleteLastFmSession,
-                onDisconnect = onDisconnectLastFm,
+                onDisconnect = { pendingConfirmation = ProfileConfirmation.DisconnectLastFm },
                 onScrobblingPausedChange = onScrobblingPausedChange,
                 onSyncUpdates = onSyncLastFmUpdates,
             )
@@ -118,10 +127,12 @@ internal fun ProfileScreen(
         }
         item {
             ProfilePlaybackSection(
-                showLyrics = showLyrics,
+                showOnlyActiveSyncedLyrics = showOnlyActiveSyncedLyrics,
+                centerSyncedLyrics = centerSyncedLyrics,
                 crossfadeSeconds = crossfadeSeconds,
                 equalizerAvailable = equalizerAvailable,
-                onShowLyricsChange = onShowLyricsChange,
+                onShowOnlyActiveSyncedLyricsChange = onShowOnlyActiveSyncedLyricsChange,
+                onCenterSyncedLyricsChange = onCenterSyncedLyricsChange,
                 onCrossfadeSecondsChange = onCrossfadeSecondsChange,
                 onOpenEqualizer = onOpenEqualizer,
             )
@@ -133,7 +144,7 @@ internal fun ProfileScreen(
                 downloadedSizeBytes = downloadedSizeBytes,
                 cacheSizeBytes = cacheSizeBytes,
                 onDownloadUsingCellularChange = onDownloadUsingCellularChange,
-                onClearDownloads = onClearDownloads,
+                onClearDownloads = { pendingConfirmation = ProfileConfirmation.ClearDownloads },
                 onClearCache = onClearCache,
             )
         }
@@ -141,7 +152,6 @@ internal fun ProfileScreen(
             ProfileConnectionSection(
                 useLocalBackend = useLocalBackend,
                 showLocalBackendOption = showLocalBackendOption,
-                canUseNetwork = canUseNetwork,
                 syncMode = syncMode,
                 offlineOnly = offlineOnly,
                 onUseLocalBackendChange = onUseLocalBackendChange,
@@ -156,6 +166,54 @@ internal fun ProfileScreen(
             )
         }
     }
+    pendingConfirmation?.let { confirmation ->
+        AlertDialog(
+            onDismissRequest = { pendingConfirmation = null },
+            title = { Text(confirmation.title) },
+            text = { Text(confirmation.message) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingConfirmation = null
+                        when (confirmation) {
+                            ProfileConfirmation.SignOut -> onSignOut()
+                            ProfileConfirmation.DisconnectLastFm -> onDisconnectLastFm()
+                            ProfileConfirmation.ClearDownloads -> onClearDownloads()
+                        }
+                    },
+                ) {
+                    Text(confirmation.confirmLabel)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmation = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+private enum class ProfileConfirmation(
+    val title: String,
+    val message: String,
+    val confirmLabel: String,
+) {
+    SignOut(
+        title = "Sign out?",
+        message = "You will need to sign in again to use your account.",
+        confirmLabel = "Sign out",
+    ),
+    DisconnectLastFm(
+        title = "Disconnect Last.fm?",
+        message = "Listening history will stop syncing to Last.fm.",
+        confirmLabel = "Disconnect",
+    ),
+    ClearDownloads(
+        title = "Clear downloads?",
+        message = "Downloaded music will be removed from this device.",
+        confirmLabel = "Clear",
+    ),
 }
 
 @Composable

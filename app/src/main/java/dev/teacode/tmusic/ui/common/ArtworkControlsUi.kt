@@ -13,12 +13,14 @@ import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -126,12 +128,10 @@ fun CircleIconButton(
     buttonSize: Dp = 52.dp,
     containerSize: Dp = 40.dp,
     activeContentColor: Color = ActiveControlRed,
+    suppressInteractionIndication: Boolean = false,
 ) {
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.size(buttonSize),
-    ) {
+    @Composable
+    fun Content() {
         Surface(
             modifier = Modifier.size(containerSize),
             shape = CircleShape,
@@ -145,6 +145,32 @@ fun CircleIconButton(
                     modifier = iconModifier,
                 )
             }
+        }
+    }
+
+    if (!suppressInteractionIndication) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.size(buttonSize),
+        ) {
+            Content()
+        }
+    } else {
+        val interactionSource = remember { MutableInteractionSource() }
+        Box(
+            modifier = modifier
+                .size(buttonSize)
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    enabled = enabled,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Content()
         }
     }
 }
@@ -164,7 +190,8 @@ fun CollectionDownloadControls(
 ) {
     var showRemoveDownloadDialog by remember { mutableStateOf(false) }
     val isQueued = downloadState == DownloadState.Queued
-    val isError = isQueued && !isActive && !isPaused
+    val isPausedDownload = isQueued && isPaused
+    val isError = isQueued && !isActive && !isPausedDownload
     val dialogTitle = if (downloadState == DownloadState.Downloaded) {
         "Remove download?"
     } else {
@@ -179,13 +206,13 @@ fun CollectionDownloadControls(
     CollectionDownloadButton(
         downloadState = downloadState,
         progressPercent = progressPercent,
-        isPaused = isPaused,
+        isPaused = isPausedDownload,
         isActive = isActive,
         isError = isError,
         enabled = enabled,
         contentDescription = when {
             downloadState == DownloadState.Downloaded -> deleteContentDescription
-            isPaused -> "Resume download"
+            isPausedDownload -> "Resume download"
             isActive -> "Pause download"
             else -> downloadContentDescription
         },

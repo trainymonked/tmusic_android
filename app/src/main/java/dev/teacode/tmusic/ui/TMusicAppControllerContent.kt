@@ -6,6 +6,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.NonRestartableComposable
 import androidx.compose.runtime.getValue
@@ -129,6 +131,34 @@ internal fun TMusicAppControllerContent(
         )
     }
 
+    DisposableEffect(authRepository, appState, context) {
+        authRepository.setServerResponseListener {
+            scope.launch {
+                if (
+                    appState.account != null &&
+                    !appState.offlineOnly &&
+                    appState.syncMode != SyncMode.OfflineOnly &&
+                    context.hasUsableNetworkConnection(appState.useLocalBackend)
+                ) {
+                    appState.syncMode = SyncMode.Online
+                }
+            }
+        }
+        authRepository.setServerFailureListener { error ->
+            if (error.isServerAvailabilityFailure()) {
+                scope.launch {
+                    if (!appState.offlineOnly) {
+                        appState.syncMode = SyncMode.Offline
+                    }
+                }
+            }
+        }
+        onDispose {
+            authRepository.setServerResponseListener(null)
+            authRepository.setServerFailureListener(null)
+        }
+    }
+
     TMusicAppStateContent(appState) {
         val lastFmConnected = lastFmConnection.state == ScrobbleState.Ready &&
             !lastFmConnection.username.isNullOrBlank()
@@ -157,8 +187,9 @@ internal fun TMusicAppControllerContent(
                 onError = { message -> libraryError = message },
             )
         }
-        val offlinePlayableTrackIds = remember(tracks, downloadedSizeBytes, cacheSizeBytes) {
-            tracks
+        val offlinePlayableTrackIds = remember(tracks, albumTracksById, downloadedSizeBytes, cacheSizeBytes) {
+            (tracks + albumTracksById.values.flatten())
+                .distinctBy { track -> track.id }
                 .filter { track ->
                     track.downloadState == DownloadState.Downloaded ||
                         musicRepository.localPlaybackUrl(track.id) != null ||
@@ -189,7 +220,6 @@ internal fun TMusicAppControllerContent(
     fun disableMediaPlaybackForAccount() = networkPolicyController.disableMediaPlaybackForAccount()
     fun canCheckAppUpdates(): Boolean = networkPolicyController.canCheckAppUpdates()
     fun canUseNetworkForCollectionDownloads(): Boolean = networkPolicyController.canUseNetworkForCollectionDownloads()
-    fun markServerUnavailable(error: Throwable) = networkPolicyController.markServerUnavailable(error)
 
     val appUpdateDebugStatus = networkPolicyController.appUpdateDebugStatus()
     AppUpdateEffects(
@@ -241,6 +271,32 @@ internal fun TMusicAppControllerContent(
         playbackPersistenceController.removePreparedPlaybackItemsAfterCurrent()
 
     fun cancelCrossfade() = playbackPersistenceController.cancelCrossfade()
+
+    val authSessionActionHost = createAuthSessionActionHost(
+        appState = appState,
+        authRepository = authRepository,
+        googleSignInTokenProvider = googleSignInTokenProvider,
+        userPreferencesStore = userPreferencesStore,
+        libraryCacheStore = libraryCacheStore,
+        playbackStateStore = playbackStateStore,
+        pendingPlayEventStore = pendingPlayEventStore,
+        pendingLibraryMutationStore = pendingLibraryMutationStore,
+        lastFmAuthTokenStore = lastFmAuthTokenStore,
+        clearGaplessPlaybackState = ::clearGaplessPlaybackState,
+    )
+    suspend fun signOutLocalSession(message: String? = null) {
+        authSessionActionHost.signOutLocalSession(message)
+    }
+
+    fun markServerUnavailable(error: Throwable) {
+        if (error.isUnauthorizedError()) {
+            scope.launch {
+                signOutLocalSession(error.unauthorizedSessionMessage())
+            }
+            return
+        }
+        networkPolicyController.markServerUnavailable(error)
+    }
 
     val playbackErrorActionHost = createPlaybackErrorController(
         appState = appState,
@@ -309,22 +365,6 @@ internal fun TMusicAppControllerContent(
 
     fun goBack() = navigationController.goBack()
 
-    val authSessionActionHost = createAuthSessionActionHost(
-        appState = appState,
-        authRepository = authRepository,
-        googleSignInTokenProvider = googleSignInTokenProvider,
-        userPreferencesStore = userPreferencesStore,
-        libraryCacheStore = libraryCacheStore,
-        playbackStateStore = playbackStateStore,
-        pendingPlayEventStore = pendingPlayEventStore,
-        pendingLibraryMutationStore = pendingLibraryMutationStore,
-        lastFmAuthTokenStore = lastFmAuthTokenStore,
-        clearGaplessPlaybackState = ::clearGaplessPlaybackState,
-    )
-    suspend fun signOutLocalSession(message: String? = null) {
-        authSessionActionHost.signOutLocalSession(message)
-    }
-
     val libraryLoadActionHost = createLibraryLoadActionHost(
         appState = appState,
         scope = scope,
@@ -335,6 +375,7 @@ internal fun TMusicAppControllerContent(
         lastFmAuthTokenStore = lastFmAuthTokenStore,
         signOutLocalSession = ::signOutLocalSession,
         markServerUnavailable = ::markServerUnavailable,
+        hasNetworkConnection = ::hasNetworkConnection,
     )
     fun loadLibrary(targetDestination: AppDestination = destination) {
         libraryLoadActionHost.loadLibrary(targetDestination)
@@ -441,6 +482,13 @@ internal fun TMusicAppControllerContent(
         artworkLyricsActionHost.loadArtwork(artworkKey, imageSize)
     }
 
+    fun refreshArtwork(
+        artworkKey: String,
+        imageSize: ArtworkImageSize = ArtworkImageSize.AlbumGrid,
+    ) {
+        artworkLyricsActionHost.refreshArtwork(artworkKey, imageSize)
+    }
+
     fun loadLyrics(track: Track) {
         artworkLyricsActionHost.loadLyrics(track)
     }
@@ -453,7 +501,6 @@ internal fun TMusicAppControllerContent(
         playerState = playerState,
         syncMode = syncMode,
         offlineOnly = offlineOnly,
-        showLyrics = showLyrics,
         loadLyrics = ::loadLyrics,
     )
 
@@ -495,6 +542,9 @@ internal fun TMusicAppControllerContent(
         scope = scope,
         getExoPlayer = { exoPlayer },
         setExoPlayer = { exoPlayer = it },
+        resolvePlaybackMediaCacheKey = { trackId, playbackUrl ->
+            mediaCache.resolvePlaybackMediaCacheKey(trackId, playbackUrl)
+        },
         musicRepository = musicRepository,
         authRepository = authRepository,
         completeActivePlayEvent = { force -> completeActivePlayEvent(force = force) },
@@ -555,6 +605,10 @@ internal fun TMusicAppControllerContent(
         playbackRuntimeActionHost.prefetchNextTrackUrl(queue)
     }
 
+    fun cancelNextTrackPrefetch() {
+        playbackRuntimeActionHost.cancelNextTrackPrefetch()
+    }
+
     fun nextCrossfadeQueueIndex(queue: PlaybackQueue): Int? {
         return playbackRuntimeActionHost.nextCrossfadeQueueIndex(queue)
     }
@@ -580,6 +634,7 @@ internal fun TMusicAppControllerContent(
         clearGaplessPlaybackState = ::clearGaplessPlaybackState,
         localOrCachedPlaybackUrl = ::localOrCachedPlaybackUrl,
         loadArtwork = ::loadArtwork,
+        cancelNextTrackPrefetch = ::cancelNextTrackPrefetch,
         prefetchNextTrackUrl = ::prefetchNextTrackUrl,
         startGaplessPlayback = ::startGaplessPlayback,
         startPlayback = ::startPlayback,
@@ -764,6 +819,7 @@ internal fun TMusicAppControllerContent(
         musicRepository = musicRepository,
         authRepository = authRepository,
         canAttemptMetadataRequest = ::canAttemptMetadataRequest,
+        hasNetworkConnection = ::hasNetworkConnection,
         canUseServerRequests = ::canUseServerRequests,
         playlistIsFullyDownloaded = ::playlistIsFullyDownloaded,
         applyPlaylistTrackPage = ::applyPlaylistTrackPage,
@@ -774,12 +830,15 @@ internal fun TMusicAppControllerContent(
         libraryDetailActionHost.loadPlaylistTracks(playlist, force)
     }
 
-    fun loadFullFavoritesPlaylist(playlist: Playlist) {
-        if (!canAttemptMetadataRequest() || playlist.id in playlistTrackLoadsInProgress) {
+    fun loadFullFavoritesPlaylist(
+        playlist: Playlist,
+        allowOfflineProbe: Boolean = false,
+        onLoaded: () -> Unit = {},
+    ) {
+        val requestAllowed = canAttemptMetadataRequest() ||
+            (allowOfflineProbe && syncMode == SyncMode.Offline && hasNetworkConnection())
+        if (!requestAllowed || playlist.id in playlistTrackLoadsInProgress) {
             return
-        }
-        if (syncMode == SyncMode.Offline) {
-            syncMode = SyncMode.Syncing
         }
         playlistTrackLoadsInProgress = playlistTrackLoadsInProgress + playlist.id
         scope.launch {
@@ -790,6 +849,7 @@ internal fun TMusicAppControllerContent(
                 syncMode = SyncMode.Online
                 applyPlaylistPayload(payload)
                 playlistTrackHasMoreById = playlistTrackHasMoreById + (playlist.id to false)
+                onLoaded()
             }.onFailure { error ->
                 markServerUnavailable(error)
                 libraryError = error.userMessage()
@@ -841,6 +901,33 @@ internal fun TMusicAppControllerContent(
         }
     }
 
+    fun refreshPlaylist(playlist: Playlist) {
+        val refreshCover = {
+            refreshArtwork(playlistArtworkKey(playlist), ArtworkImageSize.AlbumGrid)
+        }
+        val refreshCoverAfterLoad = if (canUseMediaServerRequests()) {
+            refreshCover()
+            val noOp: () -> Unit = {}
+            noOp
+        } else {
+            refreshCover
+        }
+        if (playlist.isFavoritesPlaylist()) {
+            loadFullFavoritesPlaylist(
+                playlist = playlist,
+                allowOfflineProbe = true,
+                onLoaded = refreshCoverAfterLoad,
+            )
+        } else {
+            libraryDetailActionHost.loadPlaylistTracks(
+                playlist = playlist,
+                force = true,
+                allowOfflineProbe = true,
+                onLoaded = refreshCoverAfterLoad,
+            )
+        }
+    }
+
     fun loadMoreAlbums() {
         libraryDetailActionHost.loadMoreAlbums()
     }
@@ -866,6 +953,7 @@ internal fun TMusicAppControllerContent(
     }
 
     fun openArtist(artist: LibraryArtist) {
+        fullPlayerOpen = false
         val existingArtistIndex = artists.indexOfFirst { it.id == artist.id }
         artists = if (existingArtistIndex >= 0) {
             artists.mapIndexed { index, existingArtist ->
@@ -926,8 +1014,9 @@ internal fun TMusicAppControllerContent(
         addRecentItem = ::addRecentItem,
         loadLibrary = ::loadLibrary,
         loadArtists = libraryDetailActionHost::reloadArtists,
-        loadFullFavoritesPlaylist = ::loadFullFavoritesPlaylist,
+        loadFullFavoritesPlaylist = { playlist -> loadFullFavoritesPlaylist(playlist) },
         loadPlaylistTracks = ::loadPlaylistTracks,
+        refreshPlaylist = ::refreshPlaylist,
         loadArtwork = ::loadArtwork,
         resolveCachedArtist = ::resolveCachedArtist,
         openArtist = ::openArtist,
@@ -1091,9 +1180,14 @@ internal fun TMusicAppControllerContent(
         playbackQueueControlActionHost.setRepeatMode(mode)
     }
 
-    fun setShowLyrics(enabled: Boolean) {
-        showLyrics = enabled
-        userPreferencesStore.setShowLyrics(enabled)
+    fun setShowOnlyActiveSyncedLyrics(enabled: Boolean) {
+        showOnlyActiveSyncedLyrics = enabled
+        userPreferencesStore.setShowOnlyActiveSyncedLyrics(enabled)
+    }
+
+    fun setCenterSyncedLyrics(enabled: Boolean) {
+        centerSyncedLyrics = enabled
+        userPreferencesStore.setCenterSyncedLyrics(enabled)
     }
 
     fun togglePlayback() {
@@ -1465,10 +1559,13 @@ internal fun TMusicAppControllerContent(
         libraryCacheStore = libraryCacheStore,
         appCacheStore = appCacheStore,
         canUseServerRequests = ::canUseServerRequests,
+        getActivePlaybackCacheKey = {
+            runCatching { exoPlayer.currentMediaItem?.localConfiguration?.customCacheKey }
+                .getOrNull()
+        },
         clearGaplessPlaybackState = ::clearGaplessPlaybackState,
         refreshStorageStats = ::refreshStorageStats,
-        retainedTrackIds = { setOfNotNull(playerState.currentTrack?.id) },
-        retainedPlaybackCacheKeys = { setOfNotNull(playerState.streamUrl) },
+        updateTrackDownloadState = ::updateTrackDownloadState,
         clearPlaybackCache = {
             mediaCache.keys.toList().forEach { key -> mediaCache.removeResource(key) }
         },
@@ -1478,7 +1575,6 @@ internal fun TMusicAppControllerContent(
                 .forEach { key -> mediaCache.removeResource(key) }
         },
         playbackCacheDirName = MEDIA3_PLAYBACK_CACHE_DIR,
-        loadProfileAvatar = ::loadProfileAvatar,
     )
     fun clearDownloads() {
         storageMaintenanceActionHost.clearDownloads()
@@ -1587,11 +1683,28 @@ internal fun TMusicAppControllerContent(
         }
     }
 
-    TMusicAppRuntimeRenderBinding(
+    val serverRequestsAvailable = canUseServerRequests()
+    val currentPlaybackPositionMs = remember(exoPlayer) {
+        {
+            runCatching {
+                exoPlayer.currentMediaItem
+                    ?.let { exoPlayer.currentPosition.coerceAtLeast(0L) }
+                    ?: -1L
+            }
+                .getOrDefault(-1L)
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalPlaybackPositionMs provides currentPlaybackPositionMs,
+        LocalShowOnlyActiveSyncedLyrics provides showOnlyActiveSyncedLyrics,
+        LocalCenterSyncedLyrics provides centerSyncedLyrics,
+    ) {
+        TMusicAppRuntimeRenderBinding(
         appState = appState,
         offlinePlayableTrackIds = offlinePlayableTrackIds,
         appUpdateController = appUpdateController,
-        canUseServerRequests = canUseServerRequests(),
+        canUseServerRequests = serverRequestsAvailable,
         equalizerAvailable = equalizerAvailable && exoPlayer.audioSessionId > 0,
         onUseLocalBackendChange = ::setUseLocalBackend,
         onGoogleSignIn = ::startGoogleSignIn,
@@ -1605,11 +1718,12 @@ internal fun TMusicAppControllerContent(
         onArtistSortChange = ::changeArtistSortOption,
         onLoadMoreAlbums = ::loadMoreAlbums,
         onLoadMoreRecentAlbums = ::loadMoreRecentAlbums,
-        loadFullFavoritesPlaylist = ::loadFullFavoritesPlaylist,
+        loadFullFavoritesPlaylist = { playlist -> loadFullFavoritesPlaylist(playlist) },
         loadPlaylistTracks = ::loadPlaylistTracks,
         onOfflineOnlyChange = ::setOfflineOnly,
         onScrobblingPausedChange = ::setScrobblingPaused,
-        onShowLyricsChange = ::setShowLyrics,
+        onShowOnlyActiveSyncedLyricsChange = ::setShowOnlyActiveSyncedLyrics,
+        onCenterSyncedLyricsChange = ::setCenterSyncedLyrics,
         onCrossfadeSecondsChange = ::setCrossfadeSeconds,
         onDownloadUsingCellularChange = ::setDownloadUsingCellular,
         onOpenEqualizer = ::openSystemEqualizer,
@@ -1667,6 +1781,7 @@ internal fun TMusicAppControllerContent(
         onSignOut = ::signOutFromUi,
         onSelectPlaylistForTrack = { playlist, track -> requestAddTrackToPlaylist(playlist, track) },
         onConfirmDuplicatePlaylist = { playlist, track -> requestAddTrackToPlaylist(playlist, track, allowDuplicate = true) },
-    )
+        )
+    }
 }
 }

@@ -88,7 +88,6 @@ internal fun MainShell(
     canSkipTracks: Boolean,
     shuffleEnabled: Boolean,
     repeatMode: PlaybackRepeatMode,
-    showLyrics: Boolean,
     currentLyrics: TrackLyrics?,
     currentLyricsUnavailable: Boolean,
     currentLyricsLoading: Boolean,
@@ -100,6 +99,7 @@ internal fun MainShell(
     playbackQueueGeneration: Long,
     playerSourceLabel: String?,
     playerSourceDetail: String?,
+    playerSourceType: PlaybackSourceType,
     isLoading: Boolean,
     errorMessage: String?,
     noticeMessage: String?,
@@ -112,7 +112,8 @@ internal fun MainShell(
     pendingPlayEventSyncProgress: Pair<Int, Int>?,
     waitingForLastFmSession: Boolean,
     scrobblingPaused: Boolean,
-    showLyricsSetting: Boolean,
+    showOnlyActiveSyncedLyrics: Boolean,
+    centerSyncedLyrics: Boolean,
     crossfadeSeconds: Int,
     equalizerAvailable: Boolean,
     offlineOnly: Boolean,
@@ -136,7 +137,8 @@ internal fun MainShell(
     onUseLocalBackendChange: (Boolean) -> Unit,
     onOfflineOnlyChange: (Boolean) -> Unit,
     onScrobblingPausedChange: (Boolean) -> Unit,
-    onShowLyricsChange: (Boolean) -> Unit,
+    onShowOnlyActiveSyncedLyricsChange: (Boolean) -> Unit,
+    onCenterSyncedLyricsChange: (Boolean) -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit,
     onDownloadUsingCellularChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
@@ -203,11 +205,55 @@ internal fun MainShell(
     onSignOut: () -> Unit,
 ) {
     val onlineMode = canUseServerRequests
-    val canPlayRemoteTracks = account.canPlayMedia
+    val canPlayRemoteTracks = onlineMode && account.canPlayMedia
     val lastFmConnected = lastFmConnection.state == ScrobbleState.Ready &&
         !lastFmConnection.username.isNullOrBlank()
     val topErrorMessage = playerError ?: errorMessage
     val cleanPlaylists = playlists.sanitizeClientPlaylists()
+    val currentTrackAlbum = playerState.currentTrack
+        ?.takeIf { track -> !track.albumId.isNullOrBlank() }
+    val onOpenPlayerSource: (() -> Unit)? = when (playerSourceType) {
+        PlaybackSourceType.Playlist -> activePlaylistId
+            ?.let { playlistId -> cleanPlaylists.firstOrNull { it.id == playlistId } }
+            ?.let { playlist ->
+                {
+                    onCloseFullPlayer()
+                    onSelectPlaylist(playlist)
+                }
+            }
+        PlaybackSourceType.Album -> {
+            val sourceAlbum = activeAlbumId?.let { albumId ->
+                (
+                    albums + savedAlbums + recentAlbums +
+                        albumsByArtist.values.flatten() + appearsOnByArtist.values.flatten()
+                    )
+                    .distinctBy { it.id }
+                    .firstOrNull { it.id == albumId }
+            }
+            when {
+                sourceAlbum != null -> {
+                    {
+                        onCloseFullPlayer()
+                        onSelectAlbum(sourceAlbum)
+                    }
+                }
+                currentTrackAlbum != null -> {
+                    {
+                        onCloseFullPlayer()
+                        onGoToTrackAlbum(currentTrackAlbum)
+                    }
+                }
+                else -> null
+            }
+        }
+        PlaybackSourceType.Search -> {
+            {
+                onCloseFullPlayer()
+                onSelectTab(AppTab.Search)
+            }
+        }
+        PlaybackSourceType.Recent -> null
+    }
     val knownTrackLikeStates = (
         tracks +
             searchResults.tracks +
@@ -636,7 +682,7 @@ internal fun MainShell(
                             currentTrackId = playerState.currentTrack?.id,
                             isPlaybackPlaying = playerState.isPlaying,
                             canPlayFromNetwork = canPlayRemoteTracks,
-                            canDownload = account.canPlayMedia,
+                            canDownload = canPlayRemoteTracks,
                             isDownloadActive = selectedAlbum?.id?.let { it in activeAlbumDownloadIds } == true,
                             offlinePlayableTrackIds = mediaPlayableTrackIds,
                             onRefresh = {
@@ -651,7 +697,7 @@ internal fun MainShell(
                             onLoadMore = {
                                 selectedAlbum?.let(onLoadMoreAlbumTracks)
                             },
-                            offlineNotice = if (!onlineMode && selectedAlbum?.isOfflineEnabled != true) {
+                            offlineNotice = if (!onlineMode) {
                                 "Offline. Showing cached album data."
                             } else {
                                 null
@@ -705,6 +751,11 @@ internal fun MainShell(
                             listState = listStateFor("library"),
                             isRefreshing = isLoading,
                             offlineOnly = offlineOnly,
+                            offlineNotice = if (!onlineMode) {
+                                "Offline. Only cached and downloaded data is available."
+                            } else {
+                                null
+                            },
                             onRefresh = onRefreshLibrary,
                             onRequestArtwork = onRequestArtwork,
                             onSelectAlbum = onSelectAlbum,
@@ -739,7 +790,7 @@ internal fun MainShell(
                             playlist = displayPlaylist,
                             tracks = playlistTracks,
                             canDownload = true,
-                            canDownloadMedia = account.canPlayMedia,
+                            canDownloadMedia = canPlayRemoteTracks,
                             isRefreshing = isLoading || selectedPlaylist.id in playlistTrackLoadsInProgress,
                             onRefresh = onRefreshPlaylist,
                             onSelectTrack = { sourceIndex ->
@@ -788,7 +839,7 @@ internal fun MainShell(
                                 playlistTrackHasMoreById[selectedPlaylist.id] != false &&
                                 playlistTracks.size < selectedPlaylist.trackCount,
                             onLoadMore = { onLoadMorePlaylistTracks(selectedPlaylist) },
-                            offlineNotice = if (!onlineMode && !displayPlaylist.isOfflineEnabled) {
+                            offlineNotice = if (!onlineMode) {
                                 "Offline. Showing cached playlist data."
                             } else {
                                 null
@@ -839,7 +890,8 @@ internal fun MainShell(
                     pendingPlayEventSyncProgress = pendingPlayEventSyncProgress,
                     waitingForLastFmSession = waitingForLastFmSession,
                     scrobblingPaused = scrobblingPaused,
-                    showLyrics = showLyricsSetting,
+                    showOnlyActiveSyncedLyrics = showOnlyActiveSyncedLyrics,
+                    centerSyncedLyrics = centerSyncedLyrics,
                     crossfadeSeconds = crossfadeSeconds,
                     equalizerAvailable = equalizerAvailable,
                     offlineOnly = offlineOnly,
@@ -852,7 +904,8 @@ internal fun MainShell(
                     onUseLocalBackendChange = onUseLocalBackendChange,
                     onOfflineOnlyChange = onOfflineOnlyChange,
                     onScrobblingPausedChange = onScrobblingPausedChange,
-                    onShowLyricsChange = onShowLyricsChange,
+                    onShowOnlyActiveSyncedLyricsChange = onShowOnlyActiveSyncedLyricsChange,
+                    onCenterSyncedLyricsChange = onCenterSyncedLyricsChange,
                     onCrossfadeSecondsChange = onCrossfadeSecondsChange,
                     onDownloadUsingCellularChange = onDownloadUsingCellularChange,
                     onOpenEqualizer = onOpenEqualizer,
@@ -895,12 +948,13 @@ internal fun MainShell(
                 canSkipTracks = canSkipTracks,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,
-                showLyrics = showLyrics,
+                showLyrics = true,
                 currentLyrics = currentLyrics,
                 currentLyricsUnavailable = currentLyricsUnavailable,
                 currentLyricsLoading = currentLyricsLoading,
                 playerSourceLabel = playerSourceLabel,
                 playerSourceDetail = playerSourceDetail,
+                onOpenPlayerSource = onOpenPlayerSource,
                 currentTrackFavorite = currentTrackFavorite,
                 canPlayRemoteTracks = canPlayRemoteTracks,
                 offlineAvailableTrackIds = mediaPlayableTrackIds,
@@ -916,7 +970,7 @@ internal fun MainShell(
                 onAddCurrentTrackToPlaylist = onAddCurrentTrackToPlaylist,
                 onGoToTrackArtist = onGoToTrackArtist,
                 onGoToTrackAlbum = onGoToTrackAlbum,
-                onRefreshCurrentLyrics = onRefreshCurrentLyrics.takeIf { account.canPlayMedia },
+                onRefreshCurrentLyrics = onRefreshCurrentLyrics.takeIf { canPlayRemoteTracks },
                 onOpenQueue = onOpenQueue,
                 onCloseQueue = onCloseQueue,
                 onCloseFullPlayer = onCloseFullPlayer,
@@ -934,7 +988,7 @@ internal fun MainShell(
                 },
                 onCollapseDragEnd = {
                     val startProgress = fullPlayerGestureProgress ?: 1f
-                    val shouldClose = startProgress <= 0.65f
+                    val shouldClose = startProgress <= 0.8f
                     playerRevealScope.launch {
                         fullPlayerRevealAnimation.snapTo(startProgress)
                         fullPlayerRevealSettling = true

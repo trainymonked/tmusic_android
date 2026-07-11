@@ -228,6 +228,9 @@ internal fun PlaybackPlayerListenerEffect(
 }
 
 private fun PlaybackException.playbackErrorMessage(): String {
+    if (isServerAvailabilityFailure()) {
+        return userMessage()
+    }
     return causeChainMessage().takeIf { it.isNotBlank() }
         ?: localizedMessage
         ?: "Playback failed"

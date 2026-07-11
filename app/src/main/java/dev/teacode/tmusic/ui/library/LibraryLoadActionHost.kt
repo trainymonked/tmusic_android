@@ -30,6 +30,7 @@ internal class LibraryLoadActionHost(
     private val setAccount: (Account?) -> Unit,
     private val authRepository: RemoteAuthRepository,
     private val musicRepository: RemoteMusicRepository,
+    private val getSyncMode: () -> SyncMode,
     private val setSyncMode: (SyncMode) -> Unit,
     private val getPlaylists: () -> List<Playlist>,
     private val setPlaylists: (List<Playlist>) -> Unit,
@@ -61,6 +62,7 @@ internal class LibraryLoadActionHost(
     private val setWaitingForLastFmSession: (Boolean) -> Unit,
     private val signOutLocalSession: suspend (String?) -> Unit,
     private val markServerUnavailable: (Throwable) -> Unit,
+    private val hasNetworkConnection: () -> Boolean,
     private val setLibraryError: (String?) -> Unit,
 ) {
     fun loadLibrary(targetDestination: AppDestination = getDefaultDestination()) {
@@ -79,6 +81,7 @@ internal class LibraryLoadActionHost(
             setAccount = setAccount,
             authRepository = authRepository,
             musicRepository = musicRepository,
+            getSyncMode = getSyncMode,
             setSyncMode = setSyncMode,
             getPlaylists = getPlaylists,
             setPlaylists = setPlaylists,
@@ -111,6 +114,7 @@ internal class LibraryLoadActionHost(
             setWaitingForLastFmSession = setWaitingForLastFmSession,
             signOutLocalSession = signOutLocalSession,
             markServerUnavailable = markServerUnavailable,
+            hasNetworkConnection = hasNetworkConnection,
             setLibraryError = setLibraryError,
         )
     }

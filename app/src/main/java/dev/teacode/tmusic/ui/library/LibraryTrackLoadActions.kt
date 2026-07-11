@@ -12,7 +12,9 @@ internal fun loadPlaylistTracksAction(
     scope: CoroutineScope,
     playlist: Playlist,
     force: Boolean,
+    allowOfflineProbe: Boolean,
     canAttemptMetadataRequest: () -> Boolean,
+    hasNetworkConnection: () -> Boolean,
     getSyncMode: () -> SyncMode,
     setSyncMode: (SyncMode) -> Unit,
     getPlaylistTrackLoadsInProgress: () -> Set<String>,
@@ -28,12 +30,16 @@ internal fun loadPlaylistTracksAction(
     applyPlaylistTrackPage: (Playlist, PlaylistPayload, Boolean) -> Playlist?,
     markServerUnavailable: (Throwable) -> Unit,
     setLibraryError: (String?) -> Unit,
+    onLoaded: () -> Unit,
 ) {
-    if (!canAttemptMetadataRequest() || playlist.id in getPlaylistTrackLoadsInProgress()) {
+    val requestAllowed = canAttemptMetadataRequest() ||
+        (
+            allowOfflineProbe &&
+                getSyncMode() == SyncMode.Offline &&
+                hasNetworkConnection()
+            )
+    if (!requestAllowed || playlist.id in getPlaylistTrackLoadsInProgress()) {
         return
-    }
-    if (getSyncMode() == SyncMode.Offline) {
-        setSyncMode(SyncMode.Syncing)
     }
     val currentPlaylist = getPlaylists().firstOrNull { it.id == playlist.id } ?: playlist
     if (!force && playlistIsFullyDownloaded(currentPlaylist)) {
@@ -79,7 +85,12 @@ internal fun loadPlaylistTracksAction(
                 payload,
                 !force && !shouldReloadFromStart && offset > 0,
             )
-            val loadedCount = payload.tracks.size
+            val pagePlaylist = payload.playlists.firstOrNull()
+            val loadedCount = maxOf(
+                payload.tracks.size,
+                pagePlaylist?.trackIds.orEmpty().size,
+                pagePlaylist?.playlistTrackIds.orEmpty().size,
+            )
             val nextLoadedCount = updatedPlaylist?.trackIds?.size ?: currentPlaylist.trackIds.size
             val totalCount = updatedPlaylist?.trackCount ?: currentPlaylist.trackCount
             setPlaylistTrackHasMoreById(
@@ -87,6 +98,7 @@ internal fun loadPlaylistTracksAction(
                     playlist.id to (loadedCount >= DETAIL_TRACK_PAGE_LIMIT && nextLoadedCount < totalCount)
                     ),
             )
+            onLoaded()
         }.onFailure { error ->
             markServerUnavailable(error)
             setLibraryError(error.userMessage())
@@ -145,9 +157,6 @@ internal fun loadAlbumTracksAction(
         return
     }
 
-    if (getSyncMode() == SyncMode.Offline) {
-        setSyncMode(SyncMode.Syncing)
-    }
     setAlbumTrackLoadsInProgress(getAlbumTrackLoadsInProgress() + album.id)
     scope.launch {
         runCatching {

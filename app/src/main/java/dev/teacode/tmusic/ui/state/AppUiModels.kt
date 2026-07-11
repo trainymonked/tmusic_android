@@ -111,6 +111,16 @@ enum class SyncMode {
     OfflineOnly,
 }
 
+internal fun SyncMode.connectionStatusLabel(): String {
+    return when (this) {
+        SyncMode.Offline -> "Offline"
+        SyncMode.Syncing,
+        SyncMode.Online,
+        -> "Online"
+        SyncMode.OfflineOnly -> "Offline only"
+    }
+}
+
 internal val OfflineAccount = Account(
     id = "offline",
     displayName = "Offline mode",

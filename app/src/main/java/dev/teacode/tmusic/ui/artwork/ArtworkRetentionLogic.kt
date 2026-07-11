@@ -18,7 +18,7 @@ internal fun downloadedArtworkKeys(
         }
         .toSet()
     val playlistArtworkKeys = playlists
-        .filter { playlist -> playlist.isOfflineEnabled || playlist.isFavorites }
+        .filter { playlist -> playlist.isOfflineEnabled }
         .map(::playlistArtworkKey)
         .toSet()
     return trackArtworkKeys + playlistArtworkKeys

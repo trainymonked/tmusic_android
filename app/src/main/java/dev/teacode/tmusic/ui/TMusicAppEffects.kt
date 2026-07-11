@@ -3,6 +3,7 @@ package dev.teacode.tmusic.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.media3.common.Player
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
@@ -115,13 +116,10 @@ internal fun CurrentTrackLyricsEffect(
     playerState: PlayerState,
     syncMode: SyncMode,
     offlineOnly: Boolean,
-    showLyrics: Boolean,
     loadLyrics: (Track) -> Unit,
 ) {
-    LaunchedEffect(playerState.currentTrack?.id, syncMode, offlineOnly, showLyrics) {
-        if (showLyrics) {
-            playerState.currentTrack?.let(loadLyrics)
-        }
+    LaunchedEffect(playerState.currentTrack?.id, syncMode, offlineOnly) {
+        playerState.currentTrack?.let(loadLyrics)
     }
 }
 
@@ -188,6 +186,7 @@ internal fun QueueRequestEffects(
 internal fun CrossfadePreparationEffects(
     exoPlayer: ExoPlayer,
     standbyExoPlayer: ExoPlayer,
+    mediaCache: SimpleCache,
     playerState: PlayerState,
     playbackQueue: PlaybackQueue,
     playbackQueueGeneration: Long,
@@ -246,7 +245,11 @@ internal fun CrossfadePreparationEffects(
             return@LaunchedEffect
         }
         val mediaId = "crossfade:${System.nanoTime()}:$targetIndex:${targetTrack.id}"
-        standbyExoPlayer.prepareCrossfadeItem(targetUrl, mediaId)
+        standbyExoPlayer.prepareCrossfadeItem(
+            url = targetUrl,
+            mediaId = mediaId,
+            cacheKey = mediaCache.resolvePlaybackMediaCacheKey(targetTrack.id, targetUrl),
+        )
         setPreparedCrossfade(
             PreparedCrossfade(
                 player = standbyExoPlayer,

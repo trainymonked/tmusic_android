@@ -37,10 +37,9 @@ internal class TMusicAppMutableState(
     var useLocalBackend by mutableStateOf(userPreferencesStore.useLocalBackend())
     var offlineOnly by mutableStateOf(initialState.offlineOnly && initialState.canContinueOffline)
     var syncMode by mutableStateOf(
-        if (initialState.offlineOnly && initialState.canContinueOffline) {
-            SyncMode.OfflineOnly
-        } else {
-            SyncMode.Offline
+        when {
+            initialState.offlineOnly && initialState.canContinueOffline -> SyncMode.OfflineOnly
+            else -> SyncMode.Syncing
         },
     )
     var destination by mutableStateOf(AppDestination())
@@ -60,6 +59,8 @@ internal class TMusicAppMutableState(
     var profileAvatarLoadKey by mutableStateOf<String?>(null)
     var prefetchedPlaybackUrls by mutableStateOf<Map<String, String>>(emptyMap())
     var playbackUrlPrefetchesInProgress by mutableStateOf<Set<String>>(emptySet())
+    var nextTrackPrefetchJob: Job? = null
+    var nextTrackPrefetchSerial = 0L
     var gaplessPlaybackRequest by mutableStateOf<GaplessPlaybackRequest?>(null)
     var gaplessMediaQueueIndices by mutableStateOf<Map<String, Int>>(emptyMap())
     var gaplessMediaUrls by mutableStateOf<Map<String, String>>(emptyMap())
@@ -79,7 +80,8 @@ internal class TMusicAppMutableState(
     var nowPlayingTrackId by mutableStateOf<String?>(null)
     var scrobblingPaused by mutableStateOf(userPreferencesStore.scrobblingPaused())
     var shuffleEnabled by mutableStateOf(userPreferencesStore.shuffleEnabled())
-    var showLyrics by mutableStateOf(userPreferencesStore.showLyrics())
+    var showOnlyActiveSyncedLyrics by mutableStateOf(userPreferencesStore.showOnlyActiveSyncedLyrics())
+    var centerSyncedLyrics by mutableStateOf(userPreferencesStore.centerSyncedLyrics())
     var downloadUsingCellular by mutableStateOf(userPreferencesStore.downloadUsingCellular())
     var showEnableCellularDownloadDialog by mutableStateOf(false)
     var crossfadeSeconds by mutableStateOf(userPreferencesStore.crossfadeSeconds())
@@ -149,7 +151,9 @@ internal class TMusicAppMutableState(
     var searchHasMore by mutableStateOf(false)
     var favoriteSyncTrackIds by mutableStateOf<Set<String>>(emptySet())
     var recentItems by mutableStateOf(userPreferencesStore.recentLibraryItems())
-    var libraryLoading by mutableStateOf(false)
+    var libraryLoading by mutableStateOf(
+        initialState.account != null && !(initialState.offlineOnly && initialState.canContinueOffline),
+    )
     var libraryLoadSerial by mutableStateOf(0)
     var libraryLoadJob by mutableStateOf<Job?>(null)
     var libraryError by mutableStateOf<String?>(null)

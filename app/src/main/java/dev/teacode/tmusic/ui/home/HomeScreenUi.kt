@@ -39,15 +39,15 @@ fun HomeScreen(
     onSelectArtist: (LibraryArtist) -> Unit,
     onSelectAlbum: (LibraryAlbum) -> Unit,
 ) {
-    val status = when (syncMode) {
-        SyncMode.Offline -> "Offline"
-        SyncMode.Syncing -> "Syncing"
-        SyncMode.Online -> null
-        SyncMode.OfflineOnly -> "Offline only"
+    val status = syncMode.connectionStatusLabel().takeUnless { it == "Online" }
+    val offlineNotice = if (syncMode == SyncMode.Offline || syncMode == SyncMode.OfflineOnly) {
+        "Offline. Only cached and downloaded data is available."
+    } else {
+        null
     }
     val showLoadingSkeleton = isLoading &&
         (syncMode == SyncMode.Syncing || (artists.isEmpty() && recentAlbums.isEmpty()))
-    val homeLazyItemCount = 2 + if (recentAlbums.isNotEmpty()) {
+    val homeLazyItemCount = 2 + (if (offlineNotice != null) 1 else 0) + if (recentAlbums.isNotEmpty()) {
         1 + recentAlbums.size + if (isLoadingMoreRecentAlbums) 1 else 0
     } else {
         0
@@ -90,6 +90,13 @@ fun HomeScreen(
                         showOfflineTrackCount = syncMode == SyncMode.Offline || syncMode == SyncMode.OfflineOnly,
                         status = status,
                     )
+                }
+            }
+            if (offlineNotice != null) {
+                item(key = "home-offline-notice") {
+                    Box(modifier = Modifier.padding(horizontal = ScreenHorizontalPadding, vertical = 2.dp)) {
+                        OfflineNotice(offlineNotice)
+                    }
                 }
             }
             item(key = "home-artists") {
@@ -140,7 +147,7 @@ fun HomeScreen(
                         recentBadge = album.recentChangeBadgeLabel(),
                     )
                 }
-                if (isLoadingMoreRecentAlbums) {
+                if (isLoadingMoreRecentAlbums && !isLoading) {
                     item(key = "latest-albums-loading") {
                         LinearProgressIndicator(
                             modifier = Modifier

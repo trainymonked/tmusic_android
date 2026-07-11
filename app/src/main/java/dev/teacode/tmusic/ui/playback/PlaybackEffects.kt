@@ -210,16 +210,16 @@ internal fun PlaybackEffects(
             } else {
                 null
             }
-            exoPlayer.setMediaItem(
-                if (mediaId != null) {
-                    MediaItem.Builder()
-                        .setUri(streamUrl)
-                        .setMediaId(mediaId)
-                        .build()
-                } else {
-                    MediaItem.fromUri(streamUrl)
-                },
-            )
+            val mediaItem = MediaItem.Builder()
+                .setUri(streamUrl)
+                .apply {
+                    mediaId?.let { id -> setMediaId(id) }
+                    currentTrack
+                        ?.let { track -> mediaCache.resolvePlaybackMediaCacheKey(track.id, streamUrl) }
+                        ?.let { cacheKey -> setCustomCacheKey(cacheKey) }
+                }
+                .build()
+            exoPlayer.setMediaItem(mediaItem)
             if (mediaId != null && mediaQueueIndex != null) {
                 setGaplessMediaQueueIndices(mapOf(mediaId to mediaQueueIndex))
                 setGaplessMediaUrls(mapOf(mediaId to streamUrl))
@@ -237,6 +237,9 @@ internal fun PlaybackEffects(
 
     LaunchedEffect(gaplessPlaybackRequest?.signature) {
         val request = gaplessPlaybackRequest ?: return@LaunchedEffect
+        val playbackCacheKeys = mediaCache.resolvePlaybackMediaCacheKeys(
+            request.trackIds.zip(request.urls),
+        )
         val hasCompleteGaplessQueue = request.trackIds == playbackQueue.tracks.map { it.id } &&
             request.queueIndices == playbackQueue.tracks.indices.toList()
         exoPlayer.stop()
@@ -250,6 +253,9 @@ internal fun PlaybackEffects(
                 MediaItem.Builder()
                     .setUri(url)
                     .setMediaId(request.mediaIds[index])
+                    .apply {
+                        playbackCacheKeys[index]?.let { cacheKey -> setCustomCacheKey(cacheKey) }
+                    }
                     .build()
             },
             request.startIndex,

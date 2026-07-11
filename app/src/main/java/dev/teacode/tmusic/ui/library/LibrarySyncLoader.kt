@@ -114,6 +114,7 @@ internal fun loadLibraryAction(
     setAccount: (dev.teacode.tmusic.domain.Account?) -> Unit,
     authRepository: RemoteAuthRepository,
     musicRepository: RemoteMusicRepository,
+    getSyncMode: () -> SyncMode,
     setSyncMode: (SyncMode) -> Unit,
     getPlaylists: () -> List<Playlist>,
     setPlaylists: (List<Playlist>) -> Unit,
@@ -146,6 +147,7 @@ internal fun loadLibraryAction(
     setWaitingForLastFmSession: (Boolean) -> Unit,
     signOutLocalSession: suspend (String?) -> Unit,
     markServerUnavailable: (Throwable) -> Unit,
+    hasNetworkConnection: () -> Boolean,
     setLibraryError: (String?) -> Unit,
 ) {
     val loadSerial = getLibraryLoadSerial() + 1
@@ -155,15 +157,13 @@ internal fun loadLibraryAction(
         delay(SERVER_OFFLINE_FALLBACK_TIMEOUT_MS)
         if (getLibraryLoadSerial() == loadSerial && getLibraryLoading()) {
             setAccount(getAccount() ?: authRepository.cachedAccount() ?: OfflineAccount)
-            setSyncMode(SyncMode.Offline)
+            val message = if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
+                "Sync is taking longer than ${SERVER_OFFLINE_FALLBACK_TIMEOUT_MS / 1000} seconds. Cached library is empty."
+            } else {
+                "Sync is taking longer than ${SERVER_OFFLINE_FALLBACK_TIMEOUT_MS / 1000} seconds. Showing cached data while it continues."
+            }
             setLibraryLoading(false)
-            setLibraryError(
-                if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
-                    "Sync is taking longer than ${SERVER_OFFLINE_FALLBACK_TIMEOUT_MS / 1000} seconds. Offline library is empty."
-                } else {
-                    "Sync is taking longer than ${SERVER_OFFLINE_FALLBACK_TIMEOUT_MS / 1000} seconds. Showing offline data while it continues."
-                },
-            )
+            setLibraryError(message)
         }
     }
     val loadJob = scope.launch {
@@ -178,13 +178,32 @@ internal fun loadLibraryAction(
             return@launch
         }
 
+        if (!hasNetworkConnection()) {
+            setSyncMode(SyncMode.Offline)
+            setLibraryError(
+                if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
+                    "Offline library is empty."
+                } else {
+                    "Showing offline data."
+                },
+            )
+            setLibraryLoading(false)
+            timeoutJob.cancel()
+            if (getLibraryLoadSerial() == loadSerial) {
+                setLibraryLoadJob(null)
+            }
+            return@launch
+        }
+
         authRepository.cachedAccount()?.let { cachedAccount ->
             if (getAccount() == null || getAccount() == OfflineAccount) {
                 setAccount(cachedAccount)
             }
         }
 
-        setSyncMode(SyncMode.Syncing)
+        if (getSyncMode() == SyncMode.Online) {
+            setSyncMode(SyncMode.Syncing)
+        }
         setLibraryLoading(true)
         setLibraryError(null)
         try {
@@ -265,6 +284,10 @@ internal fun loadLibraryAction(
                     }
                 }
             }.onFailure { error ->
+                if (error.isUnauthorizedError()) {
+                    signOutLocalSession(error.unauthorizedSessionMessage())
+                    return@onFailure
+                }
                 if (error.isDeletedAccountError()) {
                     signOutLocalSession("Account was removed. Sign in again.")
                     return@onFailure
@@ -274,14 +297,15 @@ internal fun loadLibraryAction(
                         return@onFailure
                     }
                     setAccount(getAccount() ?: authRepository.cachedAccount() ?: OfflineAccount)
-                    setSyncMode(SyncMode.Offline)
-                    setLibraryError(
-                        if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
-                            "Server sync exceeded ${SERVER_SYNC_HARD_TIMEOUT_MS / 1000} seconds. Offline library is empty."
-                        } else {
-                            "Server sync exceeded ${SERVER_SYNC_HARD_TIMEOUT_MS / 1000} seconds. Showing offline data."
-                        },
-                    )
+                    if (getSyncMode() != SyncMode.Online) {
+                        setSyncMode(SyncMode.Offline)
+                    }
+                    val message = if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
+                        "Server sync exceeded ${SERVER_SYNC_HARD_TIMEOUT_MS / 1000} seconds. Cached library is empty."
+                    } else {
+                        "Server sync exceeded ${SERVER_SYNC_HARD_TIMEOUT_MS / 1000} seconds. Showing cached data."
+                    }
+                    setLibraryError(message)
                     return@onFailure
                 }
                 if (error is CancellationException) {
@@ -296,12 +320,12 @@ internal fun loadLibraryAction(
                     return@onFailure
                 }
                 setAccount(getAccount() ?: authRepository.cachedAccount() ?: OfflineAccount)
-                setSyncMode(SyncMode.Offline)
+                markServerUnavailable(error)
                 setLibraryError(
                     if (getPlaylists().isEmpty() && getTracks().isEmpty()) {
-                        "Server unavailable. Offline library is empty."
+                        "Library sync failed. Cached library is empty. ${error.userMessage()}"
                     } else {
-                        "Server unavailable. Showing offline data. ${error.userMessage()}"
+                        "Library sync failed. Showing cached data. ${error.userMessage()}"
                     },
                 )
             }

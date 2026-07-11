@@ -68,4 +68,3 @@ internal fun createGoogleSignInController(
     setSigningIn = { appState.signingIn = it },
     loadLibrary = loadLibrary,
 )
-
