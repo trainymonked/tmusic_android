@@ -31,6 +31,19 @@ internal fun List<Track>.withKnownTrackMetadata(existingTracks: List<Track>): Li
     }
 }
 
+internal fun List<Track>.withPendingFavoriteStates(
+    pendingFavoriteStates: Map<String, Boolean>,
+): List<Track> {
+    if (isEmpty() || pendingFavoriteStates.isEmpty()) {
+        return this
+    }
+    return map { track ->
+        pendingFavoriteStates[track.id]?.let { isLiked ->
+            track.copy(isLiked = isLiked)
+        } ?: track
+    }
+}
+
 internal fun List<Track>.mergeLoadedTracks(loadedTracks: List<Track>): List<Track> {
     if (loadedTracks.isEmpty()) {
         return this

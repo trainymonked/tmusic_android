@@ -44,6 +44,7 @@ internal suspend fun signOutLocalSessionAction(
     setLibraryNotice: (String?) -> Unit,
     setPlaylists: (List<Playlist>) -> Unit,
     setTracks: (List<Track>) -> Unit,
+    setHomeArtists: (List<LibraryArtist>) -> Unit,
     setArtists: (List<LibraryArtist>) -> Unit,
     setAlbums: (List<LibraryAlbum>) -> Unit,
     setSavedAlbums: (List<LibraryAlbum>) -> Unit,
@@ -109,6 +110,7 @@ internal suspend fun signOutLocalSessionAction(
     setLibraryNotice(null)
     setPlaylists(emptyList())
     setTracks(emptyList())
+    setHomeArtists(emptyList())
     setArtists(emptyList())
     setAlbums(emptyList())
     setSavedAlbums(emptyList())

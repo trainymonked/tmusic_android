@@ -98,6 +98,7 @@ internal data class LoadedLibraryState(
     val tracks: List<Track>? = null,
     val recentAlbums: List<LibraryAlbum>? = null,
     val trackCount: Int? = null,
+    val homeArtists: List<LibraryArtist>? = null,
     val artists: List<LibraryArtist>? = null,
     val albums: List<LibraryAlbum>? = null,
     val savedAlbums: List<LibraryAlbum>? = null,

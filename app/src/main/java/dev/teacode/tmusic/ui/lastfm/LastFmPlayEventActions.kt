@@ -38,7 +38,7 @@ internal fun sendNowPlayingEventAction(
     if (!force && activeEvent.clientEventId in getNowPlayingEventIds()) {
         return
     }
-    if (getNowPlayingTrackId() == activeEvent.trackId) {
+    if (!force && getNowPlayingTrackId() == activeEvent.trackId) {
         return
     }
     if (force && !canUseServerRequests()) {

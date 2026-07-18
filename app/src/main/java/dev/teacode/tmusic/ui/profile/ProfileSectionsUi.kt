@@ -54,20 +54,6 @@ internal fun ProfilePlaybackSection(
     onOpenEqualizer: () -> Unit,
 ) {
     ProfileSettingsSection(title = "Playback") {
-        ProfileSwitchRow(
-            title = "Current lyric only (beta)",
-            subtitle = "",
-            checked = showOnlyActiveSyncedLyrics,
-            onCheckedChange = onShowOnlyActiveSyncedLyricsChange,
-        )
-        ProfileSettingDivider()
-        ProfileSwitchRow(
-            title = "Center synced lyrics",
-            subtitle = "",
-            checked = centerSyncedLyrics,
-            onCheckedChange = onCenterSyncedLyricsChange,
-        )
-        ProfileSettingDivider()
         ProfileSliderRow(
             title = "Crossfade",
             value = crossfadeSeconds,

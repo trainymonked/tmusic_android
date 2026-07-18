@@ -354,6 +354,7 @@ internal fun downloadPlaylistAction(
     updateTrackDownloadState: (String, DownloadState) -> Unit,
     ensureTrackDownloaded: suspend (Track) -> Unit,
     cacheDownloadedAssets: suspend (Track) -> Unit,
+    hasCachedArtwork: (String) -> Boolean,
     disableMediaPlaybackForAccount: () -> Unit,
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
@@ -442,6 +443,15 @@ internal fun downloadPlaylistAction(
                 .mapNotNull(sourceTracksById::get)
                 .filter { track ->
                 track.downloadState != DownloadState.Downloaded
+            }
+            val downloadedTracksMissingArtwork = offlinePlaylist.trackIds
+                .mapNotNull(sourceTracksById::get)
+                .filter { track -> track.downloadState == DownloadState.Downloaded }
+                .distinctBy(Track::listArtworkKey)
+                .filter { track -> !hasCachedArtwork(track.listArtworkKey()) }
+            downloadedTracksMissingArtwork.forEach { track ->
+                currentCoroutineContext().ensureActive()
+                cacheDownloadedAssets(track)
             }
             if (pendingTracks.isEmpty()) {
                 libraryCacheStore.saveLibrary(
@@ -540,6 +550,7 @@ internal fun downloadAlbumAction(
     updateTrackDownloadState: (String, DownloadState) -> Unit,
     ensureTrackDownloaded: suspend (Track) -> Unit,
     cacheDownloadedAssets: suspend (Track) -> Unit,
+    hasCachedArtwork: (String) -> Boolean,
     disableMediaPlaybackForAccount: () -> Unit,
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
@@ -621,6 +632,10 @@ internal fun downloadAlbumAction(
                 mergeLoadedTracks(sourceTracks)
             }
             val pendingTracks = sourceTracks.filter { it.downloadState != DownloadState.Downloaded }
+            val downloadedTracksMissingArtwork = sourceTracks
+                .filter { track -> track.downloadState == DownloadState.Downloaded }
+                .distinctBy(Track::listArtworkKey)
+                .filter { track -> !hasCachedArtwork(track.listArtworkKey()) }
             val offlineAlbum = album.copy(
                 savedByCurrentUser = wasSaved,
                 isOfflineEnabled = true,
@@ -638,6 +653,10 @@ internal fun downloadAlbumAction(
                     artistAlbums.updateOrAppendAlbum(offlineAlbum)
                 },
             )
+            downloadedTracksMissingArtwork.forEach { track ->
+                currentCoroutineContext().ensureActive()
+                cacheDownloadedAssets(track)
+            }
             if (pendingTracks.isEmpty()) {
                 return@launch
             }
@@ -839,6 +858,7 @@ internal fun resumePendingOfflineDownloadsAction(
     playlists: List<Playlist>,
     playlistDownloadJobs: Map<String, Job>,
     playlistIsFullyDownloaded: (Playlist) -> Boolean,
+    hasCachedArtwork: (String) -> Boolean,
     tracks: List<Track>,
     albums: List<LibraryAlbum>,
     savedAlbums: List<LibraryAlbum>,
@@ -863,7 +883,12 @@ internal fun resumePendingOfflineDownloadsAction(
             if (playlistDownloadJobs[playlist.id]?.isActive == true) {
                 return@forEach
             }
-            if (playlistIsFullyDownloaded(playlist)) {
+            val downloadedTracksMissingArtwork = playlist.trackIds
+                .mapNotNull(tracks.associateBy(Track::id)::get)
+                .filter { track -> track.downloadState == DownloadState.Downloaded }
+                .distinctBy(Track::listArtworkKey)
+                .any { track -> !hasCachedArtwork(track.listArtworkKey()) }
+            if (playlistIsFullyDownloaded(playlist) && !downloadedTracksMissingArtwork) {
                 return@forEach
             }
             val playlistTracks = playlist.tracksFrom(tracks)
@@ -873,7 +898,7 @@ internal fun resumePendingOfflineDownloadsAction(
                 loadedTrackCount = playlist.trackIds.size,
                 tracks = playlistTracks,
             )
-            if (downloadState != DownloadState.Downloaded) {
+            if (downloadState != DownloadState.Downloaded || downloadedTracksMissingArtwork) {
                 downloadPlaylist(playlist)
             }
         }

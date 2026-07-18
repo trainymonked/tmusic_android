@@ -36,6 +36,14 @@ class PendingLibraryMutationStore(context: Context) {
         return all().size
     }
 
+    /**
+     * Local favorite changes take precedence over any cached or in-flight
+     * library payload until the corresponding mutation is synchronized.
+     */
+    fun pendingFavoriteStates(): Map<String, Boolean> {
+        return all().pendingFavoriteStates()
+    }
+
     fun append(type: String, payload: JSONObject): PendingLibraryMutation {
         val mutation = PendingLibraryMutation(
             clientMutationId = UUID.randomUUID().toString(),
@@ -97,6 +105,21 @@ class PendingLibraryMutationStore(context: Context) {
         const val PENDING_LIBRARY_MUTATIONS_NAME = "tmusic_pending_library_mutations"
         const val KEY_MUTATIONS = "mutations"
     }
+}
+
+internal fun List<PendingLibraryMutation>.pendingFavoriteStates(): Map<String, Boolean> {
+    val states = linkedMapOf<String, Boolean>()
+    forEach { mutation ->
+        if (mutation.type != "favorite.set") {
+            return@forEach
+        }
+        val trackId = mutation.payload.opt("trackId") as? String
+        val liked = mutation.payload.opt("liked") as? Boolean
+        if (!trackId.isNullOrBlank() && liked != null) {
+            states[trackId] = liked
+        }
+    }
+    return states
 }
 
 private fun String?.isLocalPlaylistId(): Boolean {

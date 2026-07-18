@@ -97,6 +97,13 @@ internal class LastFmPlaybackEventActionHost(
         )
     }
 
+    fun restoreNowPlaying() {
+        val track = getPlayerState().currentTrack?.takeIf { getPlayerState().isPlaying } ?: return
+        val activeEvent = getActivePlayEvent()?.takeIf { it.trackId == track.id }
+            ?: newActivePlayEvent(track).also(setActivePlayEvent)
+        sendNowPlayingEvent(activeEvent, track = track, force = true)
+    }
+
     fun queuePendingPlayEvent(activeEvent: ActivePlayEvent) {
         queuePendingPlayEventAction(
             activeEvent = activeEvent,

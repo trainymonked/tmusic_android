@@ -1,7 +1,6 @@
 package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.data.ArtworkCacheStore
-import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.OfflineLyricsStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
@@ -14,7 +13,7 @@ internal fun createArtworkLyricsController(
     authRepository: RemoteAuthRepository,
     offlineLyricsStore: OfflineLyricsStore,
     artworkCacheStore: ArtworkCacheStore,
-    libraryCacheStore: LibraryCacheStore,
+    refreshStorageStats: () -> Unit,
     canUseMediaServerRequests: () -> Boolean,
     mediaDisabledMessage: () -> String,
     disableMediaPlaybackForAccount: () -> Unit,
@@ -25,7 +24,6 @@ internal fun createArtworkLyricsController(
     authRepository = authRepository,
     offlineLyricsStore = offlineLyricsStore,
     artworkCacheStore = artworkCacheStore,
-    libraryCacheStore = libraryCacheStore,
     canUseMediaServerRequests = canUseMediaServerRequests,
     isOfflineOnly = { appState.offlineOnly },
     getSyncMode = { appState.syncMode },
@@ -33,6 +31,7 @@ internal fun createArtworkLyricsController(
     mediaDisabledMessage = mediaDisabledMessage,
     disableMediaPlaybackForAccount = disableMediaPlaybackForAccount,
     markServerUnavailable = markServerUnavailable,
+    getHomeArtists = { appState.homeArtists },
     getArtists = { appState.artists },
     getSearchResults = { appState.searchResults },
     getSimilarArtistsByArtist = { appState.similarArtistsByArtist },
@@ -40,7 +39,8 @@ internal fun createArtworkLyricsController(
     getTracks = { appState.tracks },
     setTracks = { appState.tracks = it },
     getArtworkBitmaps = { appState.artworkBitmaps },
-    setArtworkBitmaps = { appState.artworkBitmaps = it },
+    putArtworkBitmap = { key, bitmap -> appState.artworkBitmaps[key] = bitmap },
+    removeArtworkBitmapsForSource = appState::removeArtworkBitmapsForSource,
     getArtworkLoadsInProgress = { appState.artworkLoadsInProgress },
     setArtworkLoadsInProgress = { appState.artworkLoadsInProgress = it },
     getLyricsByTrackId = { appState.lyricsByTrackId },
@@ -50,7 +50,7 @@ internal fun createArtworkLyricsController(
     getLyricsLoadsInProgress = { appState.lyricsLoadsInProgress },
     setLyricsLoadsInProgress = { appState.lyricsLoadsInProgress = it },
     setAccessToken = { appState.accessToken = it },
-    setCacheSizeBytes = { appState.cacheSizeBytes = it },
+    refreshStorageStats = refreshStorageStats,
     setLibraryError = { appState.libraryError = it },
     resolveCachedArtist = { artistName ->
         resolveCachedArtist(

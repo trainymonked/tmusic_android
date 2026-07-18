@@ -9,7 +9,11 @@ import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.UserPreferencesStore
 import dev.teacode.tmusic.domain.RecentLibraryItem
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal class StorageController(
     private val scope: CoroutineScope,
@@ -22,40 +26,60 @@ internal class StorageController(
     private val appCacheStore: AppCacheStore,
     private val mediaCache: SimpleCache,
 ) {
+    private var storageStatsRefreshJob: Job? = null
+    private var storageStatsRefreshPending = false
+
     fun addRecentItem(item: RecentLibraryItem) {
         userPreferencesStore.addRecentLibraryItem(item)
         appState.recentItems = userPreferencesStore.recentLibraryItems()
     }
 
     fun refreshStorageStats() {
-        scope.launch {
-            val retainedArtworkKeys = downloadedArtworkCacheKeys(appState.playlists, appState.tracks)
-            val retainedTrackIds = if (appState.playerState.isPlaying) {
-                setOfNotNull(appState.playerState.currentTrack?.id)
-            } else {
-                emptySet()
-            }
-            val retainedPlaybackCacheKeys = if (appState.playerState.isPlaying) {
-                buildSet {
-                    appState.playerState.streamUrl?.let { streamUrl ->
-                        add(streamUrl)
-                        appState.playerState.currentTrack?.id
-                            ?.let { trackId -> mediaCache.resolvePlaybackMediaCacheKey(trackId, streamUrl) }
-                            ?.let { cacheKey -> add(cacheKey) }
-                    }
-                }
-            } else {
-                emptySet()
-            }
-            appState.downloadedSizeBytes = musicRepository.downloadsSizeBytes() +
-                offlineLyricsStore.sizeBytes() +
-                artworkCacheStore.sizeBytesFor(retainedArtworkKeys)
-            appState.cacheSizeBytes = artworkCacheStore.sizeBytesExcluding(retainedArtworkKeys) +
-                libraryCacheStore.sizeBytes() +
-                musicRepository.musicCacheSizeBytesExcluding(retainedTrackIds) +
-                appCacheStore.androidCacheSizeBytes(setOf(MEDIA3_PLAYBACK_CACHE_DIR)) +
-                mediaCache.cacheSpaceExcluding(retainedPlaybackCacheKeys)
+        storageStatsRefreshPending = true
+        if (storageStatsRefreshJob?.isActive == true) {
+            return
         }
+        storageStatsRefreshJob = scope.launch {
+            while (storageStatsRefreshPending) {
+                storageStatsRefreshPending = false
+                delay(STORAGE_STATS_REFRESH_DEBOUNCE_MS)
+                refreshStorageStatsNow()
+            }
+        }
+    }
+
+    private suspend fun refreshStorageStatsNow() {
+        val playlists = appState.playlists
+        val tracks = appState.tracks
+        val playerState = appState.playerState
+        val retainedArtworkKeys = withContext(Dispatchers.Default) {
+            downloadedArtworkCacheKeys(playlists, tracks)
+        }
+        val retainedTrackIds = if (playerState.isPlaying) {
+            setOfNotNull(playerState.currentTrack?.id)
+        } else {
+            emptySet()
+        }
+        val retainedPlaybackCacheKeys = if (playerState.isPlaying) {
+            buildSet {
+                playerState.streamUrl?.let { streamUrl ->
+                    add(streamUrl)
+                    playerState.currentTrack?.id
+                        ?.let { trackId -> mediaCache.resolvePlaybackMediaCacheKey(trackId, streamUrl) }
+                        ?.let { cacheKey -> add(cacheKey) }
+                }
+            }
+        } else {
+            emptySet()
+        }
+        appState.downloadedSizeBytes = musicRepository.downloadsSizeBytes() +
+            offlineLyricsStore.sizeBytes() +
+            artworkCacheStore.sizeBytesFor(retainedArtworkKeys)
+        appState.cacheSizeBytes = artworkCacheStore.sizeBytesExcluding(retainedArtworkKeys) +
+            libraryCacheStore.sizeBytes() +
+            musicRepository.musicCacheSizeBytesExcluding(retainedTrackIds) +
+            appCacheStore.androidCacheSizeBytes(setOf(MEDIA3_PLAYBACK_CACHE_DIR)) +
+            mediaCache.cacheSpaceExcluding(retainedPlaybackCacheKeys)
     }
 
     fun clearRecentItems() {
@@ -65,6 +89,7 @@ internal class StorageController(
 }
 
 internal const val MEDIA3_PLAYBACK_CACHE_DIR = "media3_playback_cache"
+private const val STORAGE_STATS_REFRESH_DEBOUNCE_MS = 750L
 
 private fun SimpleCache.cacheSpaceExcluding(keysToExclude: Set<String>): Long {
     if (keysToExclude.isEmpty()) {

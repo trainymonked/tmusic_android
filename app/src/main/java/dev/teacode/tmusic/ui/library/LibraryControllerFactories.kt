@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.data.LibraryCacheStore
+import dev.teacode.tmusic.data.PendingLibraryMutationStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.UserPreferencesStore
@@ -50,6 +51,7 @@ internal fun createLibraryPayloadController(
     appState: TMusicAppMutableState,
     musicRepository: RemoteMusicRepository,
     libraryCacheStore: LibraryCacheStore,
+    pendingLibraryMutationStore: PendingLibraryMutationStore,
 ) = LibraryPayloadActionHost(
     musicRepository = musicRepository,
     libraryCacheStore = libraryCacheStore,
@@ -58,6 +60,7 @@ internal fun createLibraryPayloadController(
     getTracks = { appState.tracks },
     setTracks = { appState.tracks = it },
     getSavedAlbums = { appState.savedAlbums },
+    getPendingFavoriteStates = pendingLibraryMutationStore::pendingFavoriteStates,
 )
 
 internal fun createLibraryDetailController(

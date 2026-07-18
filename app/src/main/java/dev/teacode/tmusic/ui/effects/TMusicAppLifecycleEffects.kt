@@ -15,6 +15,9 @@ internal fun TMusicAppLifecycleEffects(
     canUseNetworkForCollectionDownloads: () -> Boolean,
     resumePendingOfflineDownloads: () -> Unit,
     pauseCollectionDownloadsForNetworkPolicy: () -> Unit,
+    canUseServerRequests: () -> Boolean,
+    syncPendingPlayEvents: () -> Unit,
+    restoreNowPlaying: () -> Unit,
     checkForAppUpdate: suspend (manual: Boolean) -> Unit,
     goBack: () -> Unit,
 ) {
@@ -51,6 +54,12 @@ internal fun TMusicAppLifecycleEffects(
             resumePendingOfflineDownloads()
         } else {
             pauseCollectionDownloadsForNetworkPolicy()
+        }
+    }
+    LaunchedEffect(appState.account?.id, appState.offlineOnly, appState.syncMode) {
+        if (canUseServerRequests()) {
+            syncPendingPlayEvents()
+            restoreNowPlaying()
         }
     }
     ObserveNetworkConnectivity(

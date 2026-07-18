@@ -70,9 +70,9 @@ fun ArtworkBox(
 ) {
     var displayedBitmap by remember(accentColor) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(bitmap, keepPreviousWhileLoading) {
-        if (bitmap != null) {
+        if (keepPreviousWhileLoading && bitmap != null) {
             displayedBitmap = bitmap
-        } else if (!keepPreviousWhileLoading) {
+        } else if (!keepPreviousWhileLoading && displayedBitmap != null) {
             displayedBitmap = null
         }
     }

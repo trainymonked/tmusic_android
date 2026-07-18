@@ -12,8 +12,7 @@ internal suspend fun cacheDownloadedAssetsAction(
     track: Track,
     getTracks: () -> List<Track>,
     setTracks: (List<Track>) -> Unit,
-    getArtworkBitmaps: () -> Map<String, ImageBitmap>,
-    setArtworkBitmaps: (Map<String, ImageBitmap>) -> Unit,
+    putArtworkBitmap: (String, ImageBitmap) -> Unit,
     cacheArtwork: suspend (String, ArtworkImageSize) -> ImageBitmap?,
     resolveCachedArtist: (String) -> LibraryArtist?,
     canUseMediaServerRequests: () -> Boolean,
@@ -40,7 +39,7 @@ internal suspend fun cacheDownloadedAssetsAction(
                 cacheArtwork(artworkKey, imageSize)
             }.onSuccess { bitmap ->
                 if (bitmap != null) {
-                    setArtworkBitmaps(getArtworkBitmaps() + (artworkBitmapKey(artworkKey, imageSize) to bitmap))
+                    putArtworkBitmap(artworkBitmapKey(artworkKey, imageSize), bitmap)
                 }
             }
         }
@@ -61,13 +60,11 @@ internal suspend fun cacheDownloadedAssetsAction(
                 cacheArtwork(artistKey, ArtworkImageSize.AlbumGrid)
             }.onSuccess { bitmap ->
                 if (bitmap != null) {
-                    setArtworkBitmaps(
-                        getArtworkBitmaps() + (artworkBitmapKey(artistKey, ArtworkImageSize.AlbumGrid) to bitmap),
-                    )
+                    putArtworkBitmap(artworkBitmapKey(artistKey, ArtworkImageSize.AlbumGrid), bitmap)
                 }
             }
         }
-    if (canUseMediaServerRequests()) {
+    if (track.downloadState != DownloadState.Downloaded && canUseMediaServerRequests()) {
         runCatching {
             musicRepository.lyrics(knownTrack.id)
         }.onSuccess { lyrics ->

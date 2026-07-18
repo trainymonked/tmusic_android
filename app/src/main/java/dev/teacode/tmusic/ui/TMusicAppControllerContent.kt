@@ -116,6 +116,7 @@ internal fun TMusicAppControllerContent(
             userPreferencesStore = userPreferencesStore,
             libraryCacheStore = libraryCacheStore,
             playbackStateStore = playbackStateStore,
+            pendingLibraryMutationStore = pendingLibraryMutationStore,
         )
     }
 
@@ -144,18 +145,8 @@ internal fun TMusicAppControllerContent(
                 }
             }
         }
-        authRepository.setServerFailureListener { error ->
-            if (error.isServerAvailabilityFailure()) {
-                scope.launch {
-                    if (!appState.offlineOnly) {
-                        appState.syncMode = SyncMode.Offline
-                    }
-                }
-            }
-        }
         onDispose {
             authRepository.setServerResponseListener(null)
-            authRepository.setServerFailureListener(null)
         }
     }
 
@@ -187,7 +178,7 @@ internal fun TMusicAppControllerContent(
                 onError = { message -> libraryError = message },
             )
         }
-        val offlinePlayableTrackIds = remember(tracks, albumTracksById, downloadedSizeBytes, cacheSizeBytes) {
+        val offlinePlayableTrackIds = remember(tracks, albumTracksById) {
             (tracks + albumTracksById.values.flatten())
                 .distinctBy { track -> track.id }
                 .filter { track ->
@@ -233,7 +224,7 @@ internal fun TMusicAppControllerContent(
     )
 
     val canSendPlayEventsState = rememberUpdatedState(
-        lastFmConnected && canUseServerRequests() && !scrobblingPaused,
+        lastFmConnected && canUseServerRequests(),
     )
 
     val playbackPersistenceController = remember(scope, playbackStateStore, playbackSnapshotSaveMutex) {
@@ -352,6 +343,10 @@ internal fun TMusicAppControllerContent(
         lastFmPlaybackEventActionHost.syncPendingPlayEvents()
     }
 
+    fun restoreNowPlaying() {
+        lastFmPlaybackEventActionHost.restoreNowPlaying()
+    }
+
     fun discardActivePlayEvent(activeEvent: ActivePlayEvent) {
         lastFmPlaybackEventActionHost.discardActivePlayEvent(activeEvent)
     }
@@ -372,6 +367,7 @@ internal fun TMusicAppControllerContent(
         musicRepository = musicRepository,
         userPreferencesStore = userPreferencesStore,
         libraryCacheStore = libraryCacheStore,
+        pendingLibraryMutationStore = pendingLibraryMutationStore,
         lastFmAuthTokenStore = lastFmAuthTokenStore,
         signOutLocalSession = ::signOutLocalSession,
         markServerUnavailable = ::markServerUnavailable,
@@ -455,7 +451,7 @@ internal fun TMusicAppControllerContent(
         authRepository = authRepository,
         offlineLyricsStore = offlineLyricsStore,
         artworkCacheStore = artworkCacheStore,
-        libraryCacheStore = libraryCacheStore,
+        refreshStorageStats = ::refreshStorageStats,
         canUseMediaServerRequests = ::canUseMediaServerRequests,
         mediaDisabledMessage = ::mediaDisabledMessage,
         disableMediaPlaybackForAccount = ::disableMediaPlaybackForAccount,
@@ -515,6 +511,10 @@ internal fun TMusicAppControllerContent(
 
     suspend fun cacheDownloadedAssets(track: Track) {
         artworkLyricsActionHost.cacheDownloadedAssets(track)
+    }
+
+    fun hasCachedArtwork(artworkKey: String): Boolean {
+        return artworkLyricsActionHost.hasCachedArtwork(artworkKey)
     }
 
     PendingTransitionArtworkEffect(
@@ -788,6 +788,7 @@ internal fun TMusicAppControllerContent(
         appState = appState,
         musicRepository = musicRepository,
         libraryCacheStore = libraryCacheStore,
+        pendingLibraryMutationStore = pendingLibraryMutationStore,
     )
     fun mergeLoadedTracks(loadedTracks: List<Track>) {
         libraryPayloadActionHost.mergeLoadedTracks(loadedTracks)
@@ -1456,6 +1457,7 @@ internal fun TMusicAppControllerContent(
         userPreferencesStore = userPreferencesStore,
         canUseNetworkForCollectionDownloads = ::canUseNetworkForCollectionDownloads,
         playlistIsFullyDownloaded = ::playlistIsFullyDownloaded,
+        hasCachedArtwork = ::hasCachedArtwork,
         updateTrackDownloadState = ::updateTrackDownloadState,
         refreshStorageStats = ::refreshStorageStats,
         downloadPlaylist = { playlist -> downloadPlaylistInvoker?.invoke(playlist) },
@@ -1492,6 +1494,7 @@ internal fun TMusicAppControllerContent(
         updateTrackDownloadState = ::updateTrackDownloadState,
         ensureTrackDownloaded = ::ensureTrackDownloaded,
         cacheDownloadedAssets = ::cacheDownloadedAssets,
+        hasCachedArtwork = ::hasCachedArtwork,
         disableMediaPlaybackForAccount = ::disableMediaPlaybackForAccount,
         refreshStorageStats = ::refreshStorageStats,
         pausePlaylistDownload = ::pausePlaylistDownload,
@@ -1641,6 +1644,9 @@ internal fun TMusicAppControllerContent(
         canUseNetworkForCollectionDownloads = ::canUseNetworkForCollectionDownloads,
         resumePendingOfflineDownloads = ::resumePendingOfflineDownloads,
         pauseCollectionDownloadsForNetworkPolicy = ::pauseCollectionDownloadsForNetworkPolicy,
+        canUseServerRequests = ::canUseServerRequests,
+        syncPendingPlayEvents = ::syncPendingPlayEvents,
+        restoreNowPlaying = ::restoreNowPlaying,
         checkForAppUpdate = appUpdateHost::checkForAppUpdate,
         goBack = ::goBack,
     )

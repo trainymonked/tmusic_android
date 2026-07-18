@@ -45,6 +45,7 @@ internal fun MainShell(
     tracks: List<Track>,
     recentAlbums: List<LibraryAlbum>,
     databaseTrackCount: Int?,
+    homeArtists: List<LibraryArtist>,
     offlineAlbumIds: Set<String>,
     offlinePlayableTrackIds: Set<String>,
     artistSortOption: ArtistSortOption,
@@ -320,6 +321,7 @@ internal fun MainShell(
         emptyList()
     }
     val visibleArtists = allVisibleArtists
+    val visibleHomeArtists = homeArtists.sortedArtistsForDisplay(ArtistSortOption.TrackCount)
     val offlineLibraryAlbums = (albums + savedAlbums + downloadedAlbums)
         .filter { album ->
             album.savedByCurrentUser ||
@@ -367,15 +369,17 @@ internal fun MainShell(
     val showHomeLoadingSkeleton = destination.tab == AppTab.Home &&
         destination.homeRoute == HomeRoute.Overview &&
         isLoading &&
-        (syncMode == SyncMode.Syncing || (visibleArtists.isEmpty() && homeRecentAlbums.isEmpty()))
+        (syncMode == SyncMode.Syncing || (visibleHomeArtists.isEmpty() && homeRecentAlbums.isEmpty()))
     val selectedHomeArtist = if (destination.tab == AppTab.Home && destination.homeRoute == HomeRoute.Artist) {
         destination.artistId?.let { artistId ->
-            visibleArtists.firstOrNull { it.id == artistId }
+            visibleHomeArtists.firstOrNull { it.id == artistId }
+                ?: visibleArtists.firstOrNull { it.id == artistId }
                 ?: searchResults.artists.firstOrNull { it.id == artistId }
                 ?: similarArtistsByArtist.values.flatten().firstOrNull { it.id == artistId }
                 ?: artists.firstOrNull { it.id == artistId }
         } ?: destination.artistName?.let { name ->
-            visibleArtists.firstOrNull { it.name == name }
+            visibleHomeArtists.firstOrNull { it.name == name }
+                ?: visibleArtists.firstOrNull { it.name == name }
                 ?: searchResults.artists.firstOrNull { it.name == name }
                 ?: similarArtistsByArtist.values.flatten().firstOrNull { it.name == name }
         }
@@ -593,7 +597,7 @@ internal fun MainShell(
                     val selectedAlbum = selectedHomeAlbum
                     when (destination.homeRoute) {
                         HomeRoute.Overview -> HomeScreen(
-                            artists = visibleArtists,
+                            artists = visibleHomeArtists,
                             recentAlbums = homeRecentAlbums,
                             databaseTrackCount = databaseTrackCount,
                             offlineTrackCount = mediaPlayableTrackIds.size,

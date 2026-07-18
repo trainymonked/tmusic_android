@@ -29,27 +29,6 @@ internal fun ProfileLastFmSection(
                 valueTextAlign = TextAlign.End,
             )
             ProfileSettingDivider()
-            ProfileSwitchRow(
-                title = "Scrobbling",
-                subtitle = "",
-                checked = !scrobblingPaused,
-                onCheckedChange = { enabled -> onScrobblingPausedChange(!enabled) },
-            )
-            ProfileSettingDivider()
-            ProfileActionRow(
-                title = "Pending scrobbles",
-                subtitle = if (syncProgress != null) {
-                    "Syncing ${syncProgress.first} of ${syncProgress.second}"
-                } else if (pendingPlayEventCount > 0) {
-                    "$pendingPlayEventCount plays are waiting to sync"
-                } else {
-                    "Everything is synced"
-                },
-                actionLabel = "Sync",
-                onAction = onSyncUpdates,
-                enabled = canUseNetwork && pendingPlayEventCount > 0 && syncProgress == null,
-            )
-            ProfileSettingDivider()
             ProfileActionRow(
                 title = "Disconnect Last.fm",
                 subtitle = "",
@@ -69,13 +48,6 @@ internal fun ProfileLastFmSection(
                 onAction = if (waitingForSession) onCompleteSession else onConnect,
                 enabled = canUseNetwork,
             )
-            if (pendingPlayEventCount > 0) {
-                ProfileSettingDivider()
-                ProfileInfoRow(
-                    title = "Pending scrobbles",
-                    value = pendingPlayEventCount.toString(),
-                )
-            }
         }
     }
 }

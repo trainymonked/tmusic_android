@@ -31,6 +31,7 @@ internal suspend fun fetchLibraryState(
     var loadedPlaylists: List<Playlist>? = null
     var loadedTracks: List<Track>? = null
     var loadedRecentAlbums: List<LibraryAlbum>? = null
+    var loadedHomeArtists: List<LibraryArtist>? = null
     var loadedArtists: List<LibraryArtist>? = null
     var loadedAlbums: List<LibraryAlbum>? = null
     var loadedSavedAlbums: List<LibraryAlbum>? = null
@@ -59,7 +60,7 @@ internal suspend fun fetchLibraryState(
                     limit = HOME_ARTIST_PREVIEW_LIMIT,
                     sortOption = ArtistSortOption.TrackCount,
                 )
-                loadedArtists = artistPage.artists
+                loadedHomeArtists = artistPage.artists
                 loadedRecentAlbums = runCatching {
                     musicRepository.recentAlbums(limit = HOME_RECENT_ALBUM_PAGE_LIMIT)
                 }.getOrNull()
@@ -92,6 +93,7 @@ internal suspend fun fetchLibraryState(
         } else {
             null
         },
+        homeArtists = loadedHomeArtists,
         artists = loadedArtists,
         albums = loadedAlbums,
         savedAlbums = loadedSavedAlbums,
@@ -124,6 +126,8 @@ internal fun loadLibraryAction(
     setRecentAlbums: (List<LibraryAlbum>) -> Unit,
     getDatabaseTrackCount: () -> Int?,
     setDatabaseTrackCount: (Int?) -> Unit,
+    getHomeArtists: () -> List<LibraryArtist>,
+    setHomeArtists: (List<LibraryArtist>) -> Unit,
     getArtists: () -> List<LibraryArtist>,
     setArtists: (List<LibraryArtist>) -> Unit,
     setArtistServerSortOption: (ArtistSortOption?) -> Unit,
@@ -137,6 +141,7 @@ internal fun loadLibraryAction(
     getRecentAlbumsPaging: () -> RecentAlbumsPagingState,
     setRecentAlbumsPaging: (RecentAlbumsPagingState) -> Unit,
     libraryCacheStore: LibraryCacheStore,
+    getPendingFavoriteStates: () -> Map<String, Boolean>,
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
     getPendingPlayEventCount: () -> Int,
@@ -233,10 +238,12 @@ internal fun loadLibraryAction(
                     cachedSavedAlbums = getSavedAlbums(),
                     offlineAlbumIds = getOfflineAlbumIds(),
                 )
+                val nextTracks = mergedLibrary.tracks.withPendingFavoriteStates(getPendingFavoriteStates())
                 setPlaylists(mergedLibrary.playlists)
-                setTracks(mergedLibrary.tracks)
+                setTracks(nextTracks)
                 setRecentAlbums(mergedLibrary.recentAlbums)
                 setDatabaseTrackCount(mergedLibrary.databaseTrackCount)
+                setHomeArtists(loadedState.homeArtists ?: getHomeArtists())
                 setArtists(mergedLibrary.artists)
                 if (loadedState.artists != null) {
                     setArtistServerSortOption(targetDestination.artistServerSortOption(artistSortOption))
@@ -267,7 +274,7 @@ internal fun loadLibraryAction(
                 if (loadedState.playlists != null || loadedState.tracks != null) {
                     libraryCacheStore.saveLibrary(
                         playlists = mergedLibrary.playlists,
-                        tracks = mergedLibrary.tracks,
+                        tracks = nextTracks,
                         savedAlbums = mergedLibrary.savedAlbums,
                     )
                 }

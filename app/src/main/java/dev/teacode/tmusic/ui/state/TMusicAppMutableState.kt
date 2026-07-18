@@ -3,6 +3,7 @@ package dev.teacode.tmusic.ui
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -50,7 +51,7 @@ internal class TMusicAppMutableState(
     var queueOpen by mutableStateOf(false)
     var playbackStartSerial by mutableStateOf(0L)
     var playbackBufferedFraction by mutableStateOf(0f)
-    var artworkBitmaps by mutableStateOf<Map<String, ImageBitmap>>(emptyMap())
+    val artworkBitmaps = mutableStateMapOf<String, ImageBitmap>()
     var artworkLoadsInProgress by mutableStateOf<Set<String>>(emptySet())
     var lyricsByTrackId by mutableStateOf<Map<String, TrackLyrics>>(emptyMap())
     var lyricsLoadsInProgress by mutableStateOf<Set<String>>(emptySet())
@@ -78,10 +79,10 @@ internal class TMusicAppMutableState(
     var nowPlayingEventIds by mutableStateOf<Set<String>>(emptySet())
     var nowPlayingTrackIdsInFlight by mutableStateOf<Set<String>>(emptySet())
     var nowPlayingTrackId by mutableStateOf<String?>(null)
-    var scrobblingPaused by mutableStateOf(userPreferencesStore.scrobblingPaused())
+    var scrobblingPaused by mutableStateOf(false)
     var shuffleEnabled by mutableStateOf(userPreferencesStore.shuffleEnabled())
-    var showOnlyActiveSyncedLyrics by mutableStateOf(userPreferencesStore.showOnlyActiveSyncedLyrics())
-    var centerSyncedLyrics by mutableStateOf(userPreferencesStore.centerSyncedLyrics())
+    var showOnlyActiveSyncedLyrics by mutableStateOf(true)
+    var centerSyncedLyrics by mutableStateOf(false)
     var downloadUsingCellular by mutableStateOf(userPreferencesStore.downloadUsingCellular())
     var showEnableCellularDownloadDialog by mutableStateOf(false)
     var crossfadeSeconds by mutableStateOf(userPreferencesStore.crossfadeSeconds())
@@ -115,6 +116,7 @@ internal class TMusicAppMutableState(
     var recentAlbums by mutableStateOf<List<LibraryAlbum>>(emptyList())
     var databaseTrackCount by mutableStateOf<Int?>(null)
     var offlineAlbumIds by mutableStateOf(userPreferencesStore.offlineAlbumIds())
+    var homeArtists by mutableStateOf(initialState.tracks.downloadedArtists())
     var artists by mutableStateOf(initialState.tracks.downloadedArtists())
     var albums by mutableStateOf(initialState.tracks.downloadedAlbums(offlineAlbumIds))
     var savedAlbums by mutableStateOf(
@@ -170,6 +172,23 @@ internal class TMusicAppMutableState(
     var cacheSizeBytes by mutableStateOf(0L)
     var queueInsertionAnchorTrackId by mutableStateOf<String?>(null)
     var queueInsertionCursor by mutableStateOf<Int?>(null)
+
+    fun replaceArtworkBitmaps(bitmaps: Map<String, ImageBitmap>) {
+        artworkBitmaps.keys
+            .filter { key -> key !in bitmaps }
+            .forEach { key -> artworkBitmaps.remove(key) }
+        bitmaps.forEach { (key, bitmap) ->
+            if (artworkBitmaps[key] !== bitmap) {
+                artworkBitmaps[key] = bitmap
+            }
+        }
+    }
+
+    fun removeArtworkBitmapsForSource(artworkKey: String) {
+        artworkBitmaps.keys
+            .filter { key -> artworkSourceKey(key) == artworkKey }
+            .forEach { key -> artworkBitmaps.remove(key) }
+    }
 }
 
 @Composable

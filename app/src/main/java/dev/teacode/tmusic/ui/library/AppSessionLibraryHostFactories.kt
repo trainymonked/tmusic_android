@@ -45,6 +45,7 @@ internal fun createAuthSessionActionHost(
     setLibraryNotice = { appState.libraryNotice = it },
     setPlaylists = { appState.playlists = it },
     setTracks = { appState.tracks = it },
+    setHomeArtists = { appState.homeArtists = it },
     setArtists = {
         appState.artists = it
         appState.artistServerSortOption = null
@@ -113,6 +114,7 @@ internal fun createLibraryLoadActionHost(
     musicRepository: RemoteMusicRepository,
     userPreferencesStore: UserPreferencesStore,
     libraryCacheStore: LibraryCacheStore,
+    pendingLibraryMutationStore: PendingLibraryMutationStore,
     lastFmAuthTokenStore: LastFmAuthTokenStore,
     signOutLocalSession: suspend (String?) -> Unit,
     markServerUnavailable: (Throwable) -> Unit,
@@ -142,6 +144,8 @@ internal fun createLibraryLoadActionHost(
     setRecentAlbums = { appState.recentAlbums = it },
     getDatabaseTrackCount = { appState.databaseTrackCount },
     setDatabaseTrackCount = { appState.databaseTrackCount = it },
+    getHomeArtists = { appState.homeArtists },
+    setHomeArtists = { appState.homeArtists = it },
     getArtists = { appState.artists },
     setArtists = { appState.artists = it },
     setArtistServerSortOption = { appState.artistServerSortOption = it },
@@ -155,6 +159,7 @@ internal fun createLibraryLoadActionHost(
     getRecentAlbumsPaging = { appState.recentAlbumsPaging },
     setRecentAlbumsPaging = { appState.recentAlbumsPaging = it },
     libraryCacheStore = libraryCacheStore,
+    getPendingFavoriteStates = pendingLibraryMutationStore::pendingFavoriteStates,
     setAccessToken = { appState.accessToken = it },
     getPendingPlayEventCount = { appState.pendingPlayEventCount },
     setLastFmConnection = { appState.lastFmConnection = it },

@@ -2,7 +2,6 @@ package dev.teacode.tmusic.ui
 
 import androidx.compose.ui.graphics.ImageBitmap
 import dev.teacode.tmusic.data.ArtworkCacheStore
-import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.OfflineLyricsStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
@@ -20,7 +19,6 @@ internal class ArtworkLyricsActionHost(
     private val authRepository: RemoteAuthRepository,
     private val offlineLyricsStore: OfflineLyricsStore,
     private val artworkCacheStore: ArtworkCacheStore,
-    private val libraryCacheStore: LibraryCacheStore,
     private val canUseMediaServerRequests: () -> Boolean,
     private val isOfflineOnly: () -> Boolean,
     private val getSyncMode: () -> SyncMode,
@@ -28,6 +26,7 @@ internal class ArtworkLyricsActionHost(
     private val mediaDisabledMessage: () -> String,
     private val disableMediaPlaybackForAccount: () -> Unit,
     private val markServerUnavailable: (Throwable) -> Unit,
+    private val getHomeArtists: () -> List<LibraryArtist>,
     private val getArtists: () -> List<LibraryArtist>,
     private val getSearchResults: () -> LibrarySearchResults,
     private val getSimilarArtistsByArtist: () -> Map<String, List<LibraryArtist>>,
@@ -35,7 +34,8 @@ internal class ArtworkLyricsActionHost(
     private val getTracks: () -> List<Track>,
     private val setTracks: (List<Track>) -> Unit,
     private val getArtworkBitmaps: () -> Map<String, ImageBitmap>,
-    private val setArtworkBitmaps: (Map<String, ImageBitmap>) -> Unit,
+    private val putArtworkBitmap: (String, ImageBitmap) -> Unit,
+    private val removeArtworkBitmapsForSource: (String) -> Unit,
     private val getArtworkLoadsInProgress: () -> Set<String>,
     private val setArtworkLoadsInProgress: (Set<String>) -> Unit,
     private val getLyricsByTrackId: () -> Map<String, TrackLyrics>,
@@ -45,7 +45,7 @@ internal class ArtworkLyricsActionHost(
     private val getLyricsLoadsInProgress: () -> Set<String>,
     private val setLyricsLoadsInProgress: (Set<String>) -> Unit,
     private val setAccessToken: (String?) -> Unit,
-    private val setCacheSizeBytes: (Long) -> Unit,
+    private val refreshStorageStats: () -> Unit,
     private val setLibraryError: (String?) -> Unit,
     private val resolveCachedArtist: (String) -> LibraryArtist?,
     private val getProfileAvatarLoadKey: () -> String?,
@@ -66,9 +66,9 @@ internal class ArtworkLyricsActionHost(
             artworkKey = artworkKey,
             imageSize = imageSize,
             artworkCacheStore = artworkCacheStore,
-            libraryCacheStore = libraryCacheStore,
             musicRepository = musicRepository,
             canUseMediaServerRequests = canUseMediaServerRequests,
+            getHomeArtists = getHomeArtists,
             getArtists = getArtists,
             getSearchResults = getSearchResults,
             getSimilarArtistsByArtist = getSimilarArtistsByArtist,
@@ -77,8 +77,13 @@ internal class ArtworkLyricsActionHost(
             getArtworkLoadsInProgress = getArtworkLoadsInProgress,
             refreshAccessToken = authRepository::accessToken,
             setAccessToken = setAccessToken,
-            setCacheSizeBytes = setCacheSizeBytes,
+            refreshStorageStats = refreshStorageStats,
         )
+    }
+
+    fun hasCachedArtwork(artworkKey: String): Boolean {
+        return artworkCacheStore.cachedPath(artworkCacheKey(artworkKey, ArtworkImageSize.FullPlayer)) != null ||
+            artworkCacheStore.cachedPath(legacyArtworkCacheKey(artworkKey, ArtworkImageSize.FullPlayer)) != null
     }
 
     private suspend fun refreshArtworkCache(
@@ -89,9 +94,9 @@ internal class ArtworkLyricsActionHost(
             artworkKey = artworkKey,
             imageSize = imageSize,
             artworkCacheStore = artworkCacheStore,
-            libraryCacheStore = libraryCacheStore,
             musicRepository = musicRepository,
             canUseMediaServerRequests = canUseMediaServerRequests,
+            getHomeArtists = getHomeArtists,
             getArtists = getArtists,
             getSearchResults = getSearchResults,
             getSimilarArtistsByArtist = getSimilarArtistsByArtist,
@@ -100,7 +105,7 @@ internal class ArtworkLyricsActionHost(
             getArtworkLoadsInProgress = getArtworkLoadsInProgress,
             refreshAccessToken = authRepository::accessToken,
             setAccessToken = setAccessToken,
-            setCacheSizeBytes = setCacheSizeBytes,
+            refreshStorageStats = refreshStorageStats,
             forceRefresh = true,
         )
     }
@@ -114,7 +119,7 @@ internal class ArtworkLyricsActionHost(
             artworkKey = artworkKey,
             imageSize = imageSize,
             getArtworkBitmaps = getArtworkBitmaps,
-            setArtworkBitmaps = setArtworkBitmaps,
+            putArtworkBitmap = putArtworkBitmap,
             getArtworkLoadsInProgress = getArtworkLoadsInProgress,
             setArtworkLoadsInProgress = setArtworkLoadsInProgress,
             cacheArtwork = ::cacheArtwork,
@@ -132,8 +137,8 @@ internal class ArtworkLyricsActionHost(
             imageSize = imageSize,
             canUseMediaServerRequests = canUseMediaServerRequests,
             artworkCacheStore = artworkCacheStore,
-            getArtworkBitmaps = getArtworkBitmaps,
-            setArtworkBitmaps = setArtworkBitmaps,
+            putArtworkBitmap = putArtworkBitmap,
+            removeArtworkBitmapsForSource = removeArtworkBitmapsForSource,
             getArtworkLoadsInProgress = getArtworkLoadsInProgress,
             setArtworkLoadsInProgress = setArtworkLoadsInProgress,
             refreshArtwork = ::refreshArtworkCache,
@@ -191,8 +196,7 @@ internal class ArtworkLyricsActionHost(
             track = track,
             getTracks = getTracks,
             setTracks = setTracks,
-            getArtworkBitmaps = getArtworkBitmaps,
-            setArtworkBitmaps = setArtworkBitmaps,
+            putArtworkBitmap = putArtworkBitmap,
             cacheArtwork = ::cacheArtwork,
             resolveCachedArtist = resolveCachedArtist,
             canUseMediaServerRequests = canUseMediaServerRequests,
@@ -217,9 +221,8 @@ internal class ArtworkLyricsActionHost(
             getTracks = getTracks,
             getArtworkLoadsInProgress = getArtworkLoadsInProgress,
             artworkCacheStore = artworkCacheStore,
-            libraryCacheStore = libraryCacheStore,
             cachedArtworkBitmap = ::cachedArtworkBitmap,
-            setCacheSizeBytes = setCacheSizeBytes,
+            refreshStorageStats = refreshStorageStats,
         )
     }
 }

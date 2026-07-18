@@ -84,8 +84,21 @@ internal class NetworkPolicyController(
             }
             return
         }
-        if (error.isServerAvailabilityFailure()) {
+        if (shouldSwitchToOfflineAfterServerFailure(error, hasNetworkConnection())) {
             appState.syncMode = SyncMode.Offline
         }
     }
+}
+
+/**
+ * A failed request to one endpoint is not proof that the device lost its
+ * connection. In particular, requests started while cellular data is coming
+ * up can finish after a successful library sync. Only the system-confirmed
+ * network state may move the whole app to Offline.
+ */
+internal fun shouldSwitchToOfflineAfterServerFailure(
+    error: Throwable,
+    hasNetworkConnection: Boolean,
+): Boolean {
+    return error.isServerAvailabilityFailure() && !hasNetworkConnection
 }

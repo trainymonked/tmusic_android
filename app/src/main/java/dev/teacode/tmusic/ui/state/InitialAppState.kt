@@ -2,6 +2,7 @@ package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.data.CachedLibrary
 import dev.teacode.tmusic.data.LibraryCacheStore
+import dev.teacode.tmusic.data.PendingLibraryMutationStore
 import dev.teacode.tmusic.data.PlaybackStateStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
@@ -29,10 +30,12 @@ internal fun loadInitialAppState(
     userPreferencesStore: UserPreferencesStore,
     libraryCacheStore: LibraryCacheStore,
     playbackStateStore: PlaybackStateStore,
+    pendingLibraryMutationStore: PendingLibraryMutationStore,
 ): InitialAppState {
     val offlineOnly = userPreferencesStore.offlineOnly()
     val cachedLibrary = libraryCacheStore.library()
     val tracks = musicRepository.withOfflineState(cachedLibrary.tracks)
+        .withPendingFavoriteStates(pendingLibraryMutationStore.pendingFavoriteStates())
     val savedPlayback = playbackStateStore.state()
     val activePlayEvent = savedPlayback?.let { playback ->
         if (

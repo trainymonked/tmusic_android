@@ -75,6 +75,21 @@ fun PlaybackScrubber(
     val trackHeight = if (compact) 6.dp else 7.dp
     val containerHeight = if (compact) 6.dp else 26.dp
     val thumbSize = 12.dp
+    val fullTrackShape = RoundedCornerShape(50)
+    val leadingTrackShape = RoundedCornerShape(
+        topStart = trackHeight / 2,
+        bottomStart = trackHeight / 2,
+    )
+    val inactiveTrackColor = if (compact) {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.56f)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+    }
+    val bufferedTrackColor = if (compact) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f)
+    }
     val thumbOffsetPx = with(density) {
         ((widthPx - thumbSize.toPx()).coerceAtLeast(0f) * progressFraction).toInt()
     }
@@ -90,16 +105,22 @@ fun PlaybackScrubber(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(trackHeight)
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.56f)),
+                .clip(fullTrackShape)
+                .background(inactiveTrackColor),
         )
         if (safeBufferedFraction > progressFraction) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(safeBufferedFraction)
                     .height(trackHeight)
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)),
+                    .clip(
+                        if (compact || safeBufferedFraction >= 1f) {
+                            fullTrackShape
+                        } else {
+                            leadingTrackShape
+                        },
+                    )
+                    .background(bufferedTrackColor),
             )
         }
         if (progressFraction > 0f) {
@@ -107,7 +128,13 @@ fun PlaybackScrubber(
                 modifier = Modifier
                     .fillMaxWidth(progressFraction.coerceIn(0.01f, 1f))
                     .height(trackHeight)
-                    .clip(RoundedCornerShape(50))
+                    .clip(
+                        if (compact || progressFraction >= 1f) {
+                            fullTrackShape
+                        } else {
+                            leadingTrackShape
+                        },
+                    )
                     .background(MaterialTheme.colorScheme.primary),
             )
         }
