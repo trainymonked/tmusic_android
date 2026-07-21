@@ -37,6 +37,8 @@ internal fun createArtworkLyricsController(
     getSimilarArtistsByArtist = { appState.similarArtistsByArtist },
     getPlaylists = { appState.playlists },
     getTracks = { appState.tracks },
+    getOfflineAlbumIds = { appState.offlineAlbumIds },
+    getAlbumTracksById = { appState.albumTracksById },
     setTracks = { appState.tracks = it },
     getArtworkBitmaps = { appState.artworkBitmaps },
     putArtworkBitmap = { key, bitmap -> appState.artworkBitmaps[key] = bitmap },

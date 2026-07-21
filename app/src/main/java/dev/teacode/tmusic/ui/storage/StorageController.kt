@@ -50,10 +50,15 @@ internal class StorageController(
 
     private suspend fun refreshStorageStatsNow() {
         val playlists = appState.playlists
-        val tracks = appState.tracks
+        val offlineIndex = offlineLibraryIndex(
+            playlists = playlists,
+            tracks = appState.tracks,
+            offlineAlbumIds = appState.offlineAlbumIds,
+            albumTracksById = appState.albumTracksById,
+        )
         val playerState = appState.playerState
         val retainedArtworkKeys = withContext(Dispatchers.Default) {
-            downloadedArtworkCacheKeys(playlists, tracks)
+            downloadedArtworkCacheKeys(playlists, offlineIndex.downloadedTracks)
         }
         val retainedTrackIds = if (playerState.isPlaying) {
             setOfNotNull(playerState.currentTrack?.id)

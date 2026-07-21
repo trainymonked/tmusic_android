@@ -234,19 +234,18 @@ private suspend fun cacheDownloadedTrackIfUnretained(
     updateTrackDownloadState: (String, DownloadState) -> Unit,
     onTrackMovedToCache: (String, String?) -> Unit,
 ): Boolean {
-    val knownTrack = tracks.firstOrNull { item -> item.id == track.id } ?: track
+    val offlineIndex = offlineLibraryIndex(
+        playlists = playlists,
+        tracks = tracks,
+        offlineAlbumIds = offlineAlbumIds,
+        albumTracksById = albumTracksById,
+        extraTracks = listOf(track),
+    )
+    val knownTrack = offlineIndex.tracksById[track.id] ?: track
     if (knownTrack.downloadState != DownloadState.Downloaded) {
         return false
     }
-    val requiredByPlaylist = playlists.any { playlist ->
-        playlist.isOfflineEnabled && track.id in playlist.trackIds
-    }
-    val requiredByAlbum = offlineAlbumIds.any { albumId ->
-        knownTrack.albumId == albumId ||
-            track.albumId == albumId ||
-            albumTracksById[albumId].orEmpty().any { albumTrack -> albumTrack.id == track.id }
-    }
-    if (requiredByPlaylist || requiredByAlbum) {
+    if (offlineIndex.isRequiredByCollection(track.id)) {
         return false
     }
 

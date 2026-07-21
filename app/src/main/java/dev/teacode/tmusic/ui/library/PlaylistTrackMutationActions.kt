@@ -140,6 +140,8 @@ internal fun removeTrackFromPlaylistAction(
     setPlaylists: (List<Playlist>) -> Unit,
     getTracks: () -> List<Track>,
     getSavedAlbums: () -> List<LibraryAlbum>,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     musicRepository: RemoteMusicRepository,
     libraryCacheStore: LibraryCacheStore,
     enqueueLibraryMutation: (String, JSONObject) -> Unit,
@@ -170,6 +172,23 @@ internal fun removeTrackFromPlaylistAction(
                 .put("trackId", removedTrackId),
         )
         saveLibraryCache()
+        removedTrackId?.let { removedTrackId ->
+            scope.launch {
+                if (removePlaylistTrackDownloadIfUnretained(
+                        trackId = removedTrackId,
+                        playlists = getPlaylists(),
+                        tracks = getTracks(),
+                        offlineAlbumIds = getOfflineAlbumIds(),
+                        albumTracksById = getAlbumTracksById(),
+                        musicRepository = musicRepository,
+                        updateTrackDownloadState = updateTrackDownloadState,
+                    )
+                ) {
+                    saveLibraryCache()
+                    refreshStorageStats()
+                }
+            }
+        }
         return
     }
 
@@ -203,13 +222,16 @@ internal fun removeTrackFromPlaylistAction(
             val nextPlaylists = getPlaylists().updatePlaylist(updatedPlaylist)
             setPlaylists(nextPlaylists)
             removedTrackId?.let { trackId ->
-                val removedTrack = getTracks().firstOrNull { it.id == trackId }
-                val stillInDownloadedPlaylist = nextPlaylists.any { item ->
-                    trackId in item.trackIds && item.isOfflineEnabled
-                }
-                if (removedTrack?.downloadState == DownloadState.Downloaded && !stillInDownloadedPlaylist) {
-                    musicRepository.removeDownloadedTrack(trackId)
-                    updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
+                if (removePlaylistTrackDownloadIfUnretained(
+                        trackId = trackId,
+                        playlists = nextPlaylists,
+                        tracks = getTracks(),
+                        offlineAlbumIds = getOfflineAlbumIds(),
+                        albumTracksById = getAlbumTracksById(),
+                        musicRepository = musicRepository,
+                        updateTrackDownloadState = updateTrackDownloadState,
+                    )
+                ) {
                     refreshStorageStats()
                 }
             }
@@ -236,6 +258,30 @@ internal fun removeTrackFromPlaylistAction(
             }
         }
     }
+}
+
+private suspend fun removePlaylistTrackDownloadIfUnretained(
+    trackId: String,
+    playlists: List<Playlist>,
+    tracks: List<Track>,
+    offlineAlbumIds: Set<String>,
+    albumTracksById: Map<String, List<Track>>,
+    musicRepository: RemoteMusicRepository,
+    updateTrackDownloadState: (String, DownloadState) -> Unit,
+): Boolean {
+    val offlineIndex = offlineLibraryIndex(
+        playlists = playlists,
+        tracks = tracks,
+        offlineAlbumIds = offlineAlbumIds,
+        albumTracksById = albumTracksById,
+    )
+    val track = offlineIndex.tracksById[trackId] ?: return false
+    if (track.downloadState != DownloadState.Downloaded || offlineIndex.isRequiredByCollection(trackId)) {
+        return false
+    }
+    musicRepository.removeDownloadedTrack(trackId)
+    updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
+    return true
 }
 
 private fun Playlist.emptyTrackMembership(): Playlist {

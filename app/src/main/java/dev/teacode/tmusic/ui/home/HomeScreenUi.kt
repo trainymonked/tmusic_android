@@ -45,8 +45,7 @@ fun HomeScreen(
     } else {
         null
     }
-    val showLoadingSkeleton = isLoading &&
-        (syncMode == SyncMode.Syncing || (artists.isEmpty() && recentAlbums.isEmpty()))
+    val showLoadingSkeleton = isLoading && artists.isEmpty() && recentAlbums.isEmpty()
     val homeLazyItemCount = 2 + (if (offlineNotice != null) 1 else 0) + if (recentAlbums.isNotEmpty()) {
         1 + recentAlbums.size + if (isLoadingMoreRecentAlbums) 1 else 0
     } else {

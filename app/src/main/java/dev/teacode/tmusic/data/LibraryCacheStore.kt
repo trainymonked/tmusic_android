@@ -15,8 +15,16 @@ data class CachedLibrary(
     val playlists: List<Playlist>,
     val tracks: List<Track>,
     val savedAlbums: List<LibraryAlbum> = emptyList(),
+    val homeArtists: List<LibraryArtist> = emptyList(),
+    val recentAlbums: List<LibraryAlbum> = emptyList(),
+    val databaseTrackCount: Int? = null,
 ) {
-    val isEmpty: Boolean = playlists.isEmpty() && tracks.isEmpty() && savedAlbums.isEmpty()
+    val isEmpty: Boolean = playlists.isEmpty() &&
+        tracks.isEmpty() &&
+        savedAlbums.isEmpty() &&
+        homeArtists.isEmpty() &&
+        recentAlbums.isEmpty() &&
+        databaseTrackCount == null
 }
 
 class LibraryCacheStore(context: Context) {
@@ -32,6 +40,9 @@ class LibraryCacheStore(context: Context) {
             playlists = readPlaylists(),
             tracks = readTracks(),
             savedAlbums = readSavedAlbums(),
+            homeArtists = readHomeArtists(),
+            recentAlbums = readRecentAlbums(),
+            databaseTrackCount = readDatabaseTrackCount(),
         )
     }
 
@@ -39,11 +50,16 @@ class LibraryCacheStore(context: Context) {
         playlists: List<Playlist>,
         tracks: List<Track>,
         savedAlbums: List<LibraryAlbum>? = null,
+        homeArtists: List<LibraryArtist>? = null,
+        recentAlbums: List<LibraryAlbum>? = null,
+        databaseTrackCount: Int? = null,
     ) {
         val sequence = saveSequence.incrementAndGet()
         val playlistsSnapshot = playlists.toList()
         val tracksSnapshot = tracks.toList()
         val savedAlbumsSnapshot = savedAlbums?.toList()
+        val homeArtistsSnapshot = homeArtists?.toList()
+        val recentAlbumsSnapshot = recentAlbums?.toList()
         saveExecutor.execute {
             val albumsToSave = savedAlbumsSnapshot ?: readSavedAlbums()
             val playlistsJson = playlistsSnapshot.toJsonArray { it.toJson() }.toString()
@@ -52,11 +68,18 @@ class LibraryCacheStore(context: Context) {
             if (saveSequence.get() != sequence) {
                 return@execute
             }
-            preferences.edit()
+            val editor = preferences.edit()
                 .putString(KEY_PLAYLISTS, playlistsJson)
                 .putString(KEY_TRACKS, tracksJson)
                 .putString(KEY_SAVED_ALBUMS, savedAlbumsJson)
-                .apply()
+            homeArtistsSnapshot?.let { artists ->
+                editor.putString(KEY_HOME_ARTISTS, artists.toArtistJsonArray().toString())
+            }
+            recentAlbumsSnapshot?.let { albums ->
+                editor.putString(KEY_RECENT_ALBUMS, albums.toJsonArray { it.toJson() }.toString())
+            }
+            databaseTrackCount?.let { count -> editor.putInt(KEY_DATABASE_TRACK_COUNT, count) }
+            editor.apply()
         }
     }
 
@@ -67,7 +90,11 @@ class LibraryCacheStore(context: Context) {
 
     fun sizeBytes(): Long {
         return preferences.getString(KEY_PLAYLISTS, null).orEmpty().toByteArray().size.toLong() +
-            preferences.getString(KEY_TRACKS, null).orEmpty().toByteArray().size.toLong()
+            preferences.getString(KEY_TRACKS, null).orEmpty().toByteArray().size.toLong() +
+            preferences.getString(KEY_SAVED_ALBUMS, null).orEmpty().toByteArray().size.toLong() +
+            preferences.getString(KEY_HOME_ARTISTS, null).orEmpty().toByteArray().size.toLong() +
+            preferences.getString(KEY_RECENT_ALBUMS, null).orEmpty().toByteArray().size.toLong() +
+            if (preferences.contains(KEY_DATABASE_TRACK_COUNT)) Int.SIZE_BYTES.toLong() else 0L
     }
 
     private fun readPlaylists(): List<Playlist> {
@@ -88,11 +115,32 @@ class LibraryCacheStore(context: Context) {
             .orEmpty()
     }
 
+    private fun readHomeArtists(): List<LibraryArtist> {
+        return preferences.getString(KEY_HOME_ARTISTS, null)
+            ?.let { json -> runCatching { JSONArray(json).artistValues() }.getOrNull() }
+            .orEmpty()
+    }
+
+    private fun readRecentAlbums(): List<LibraryAlbum> {
+        return preferences.getString(KEY_RECENT_ALBUMS, null)
+            ?.let { json -> runCatching { JSONArray(json).mapAlbums() }.getOrNull() }
+            .orEmpty()
+    }
+
+    private fun readDatabaseTrackCount(): Int? {
+        return KEY_DATABASE_TRACK_COUNT
+            .takeIf(preferences::contains)
+            ?.let { key -> preferences.getInt(key, 0) }
+    }
+
     private companion object {
         const val LIBRARY_CACHE_NAME = "tmusic_library_cache"
         const val KEY_PLAYLISTS = "playlists"
         const val KEY_TRACKS = "tracks"
         const val KEY_SAVED_ALBUMS = "saved_albums"
+        const val KEY_HOME_ARTISTS = "home_artists"
+        const val KEY_RECENT_ALBUMS = "recent_albums"
+        const val KEY_DATABASE_TRACK_COUNT = "database_track_count"
     }
 }
 
@@ -269,7 +317,12 @@ private fun List<LibraryArtist>.toArtistJsonArray(): JSONArray {
             JSONObject()
                 .put("id", artist.id)
                 .put("name", artist.name)
+                .put("albumCount", artist.albumCount)
+                .put("trackCount", artist.trackCount)
                 .apply {
+                    artist.representativeAlbumId?.let { representativeAlbumId ->
+                        put("representativeAlbumId", representativeAlbumId)
+                    }
                     artist.latestReleaseYear?.let { latestReleaseYear ->
                         put("latestReleaseYear", latestReleaseYear)
                     }
@@ -292,6 +345,9 @@ private fun JSONArray?.artistValues(): List<LibraryArtist> {
         values += LibraryArtist(
             id = id,
             name = name,
+            albumCount = item.optInt("albumCount", 0),
+            trackCount = item.optInt("trackCount", 0),
+            representativeAlbumId = item.optString("representativeAlbumId").takeIf { it.isNotBlank() },
             latestReleaseYear = if (item.has("latestReleaseYear") && !item.isNull("latestReleaseYear")) {
                 item.optInt("latestReleaseYear")
             } else {

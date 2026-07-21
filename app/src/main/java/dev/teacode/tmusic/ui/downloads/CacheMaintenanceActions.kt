@@ -22,6 +22,8 @@ internal fun clearAppCacheAction(
     getTracks: () -> List<Track>,
     updateTrackDownloadState: (String, DownloadState) -> Unit,
     getSavedAlbums: () -> List<LibraryAlbum>,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     getPlayerState: () -> PlayerState,
     getActivePlaybackCacheKey: () -> String?,
     setPlayerState: (PlayerState) -> Unit,
@@ -52,18 +54,25 @@ internal fun clearAppCacheAction(
             .forEach { track -> updateTrackDownloadState(track.id, DownloadState.NotDownloaded) }
         val normalizedTracks = getTracks()
         val currentPlayerState = getPlayerState()
-        val downloadedTracks = (
-            normalizedTracks.filter { track -> track.downloadState == DownloadState.Downloaded } +
-                listOfNotNull(
-                    currentPlayerState.currentTrack
-                        ?.takeIf { track -> track.downloadState == DownloadState.Downloaded },
-                )
-        ).distinctBy { track -> track.id }
-        val downloadedTrackIds = downloadedTracks.map { track -> track.id }.toSet()
+        val currentPlaylists = getPlaylists()
+        val offlineAlbumIds = getOfflineAlbumIds()
+        val offlineIndex = offlineLibraryIndex(
+            playlists = currentPlaylists,
+            tracks = normalizedTracks,
+            offlineAlbumIds = offlineAlbumIds,
+            albumTracksById = getAlbumTracksById(),
+            extraTracks = listOfNotNull(currentPlayerState.currentTrack),
+        )
+        val downloadedTracks = offlineIndex.downloadedTracks
+        val requiredDownloadedTrackIds = offlineIndex.requiredTrackIds
         val currentTrackId = currentPlayerState.currentTrack?.id
         val currentTrackIds = setOfNotNull(currentTrackId)
-        val retainedTrackIds = downloadedTrackIds + currentTrackIds
-        val currentTrackDownloaded = currentTrackId != null && currentTrackId in downloadedTrackIds
+        val retainedTrackIds = requiredDownloadedTrackIds + currentTrackIds
+        val retainedDownloadedTracks = downloadedTracks.filter { track -> track.id in retainedTrackIds }
+        val removedDownloadedTrackIds = downloadedTracks
+            .map { track -> track.id }
+            .toSet() - retainedTrackIds
+        val currentTrackDownloaded = currentTrackId != null && currentTrackId in retainedDownloadedTracks.map { it.id }
         if (!currentPlayerState.isPlaying && currentTrackDownloaded) {
             val localStreamUrl = currentTrackId?.let(musicRepository::localPlaybackUrl)
             if (localStreamUrl != null && localStreamUrl != currentPlayerState.streamUrl) {
@@ -83,20 +92,24 @@ internal fun clearAppCacheAction(
         } else {
             emptySet()
         }
-        val currentPlaylists = getPlaylists()
         val offlinePlaylists = currentPlaylists.filter { playlist -> playlist.isOfflineEnabled }
         val retainedPlaylists = offlinePlaylists.distinctBy { playlist -> playlist.id }
-        val offlineSavedAlbums = getSavedAlbums().filter { album -> album.isOfflineEnabled }
+        val offlineSavedAlbums = getSavedAlbums().filter { album ->
+            album.isOfflineEnabled || album.id in offlineAlbumIds
+        }
         val currentArtworkKeys = currentPlayerState.currentTrack?.let { track ->
             setOfNotNull(
                 track.listArtworkKey(),
                 track.albumId?.let(::albumArtworkKey),
             )
         }.orEmpty()
-        val retainedArtworkKeys = downloadedArtworkKeys(offlinePlaylists, downloadedTracks) + currentArtworkKeys
+        val retainedArtworkKeys = downloadedArtworkKeys(offlinePlaylists, retainedDownloadedTracks) + currentArtworkKeys
         val retainedArtworkCacheKeys = artworkCacheKeysFor(retainedArtworkKeys)
         artworkCacheStore.clearExcept(retainedArtworkCacheKeys)
         musicRepository.removeDownloadsExcept(retainedTrackIds)
+        removedDownloadedTrackIds.forEach { trackId ->
+            updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
+        }
         offlineLyricsStore.clearExcept(retainedTrackIds)
         setLyricsByTrackId(getLyricsByTrackId().filterKeys { trackId -> trackId in retainedTrackIds })
         if (currentTrackIds.isEmpty()) {
@@ -111,10 +124,10 @@ internal fun clearAppCacheAction(
         }
         appCacheStore.clearAndroidCache(excludedCacheDirNames = setOf(playbackCacheDirName))
         libraryCacheStore.clear()
-        if (retainedPlaylists.isNotEmpty() || downloadedTracks.isNotEmpty() || offlineSavedAlbums.isNotEmpty()) {
+        if (retainedPlaylists.isNotEmpty() || retainedDownloadedTracks.isNotEmpty() || offlineSavedAlbums.isNotEmpty()) {
             libraryCacheStore.saveLibrary(
                 playlists = retainedPlaylists,
-                tracks = downloadedTracks,
+                tracks = retainedDownloadedTracks,
                 savedAlbums = offlineSavedAlbums,
             )
         }

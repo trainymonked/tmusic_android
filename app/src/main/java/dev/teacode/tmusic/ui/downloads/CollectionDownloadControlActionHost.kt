@@ -71,6 +71,7 @@ internal class CollectionDownloadControlActionHost(
             setPlaylistDownloadJobs = setPlaylistDownloadJobs,
             playlists = getPlaylists(),
             tracks = getTracks(),
+            albumTracksById = getAlbumTracksById(),
             savedAlbums = getSavedAlbums(),
             libraryCacheStore = libraryCacheStore,
             updateTrackDownloadState = updateTrackDownloadState,

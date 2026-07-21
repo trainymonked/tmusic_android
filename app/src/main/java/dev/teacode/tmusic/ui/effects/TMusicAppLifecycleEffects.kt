@@ -1,8 +1,10 @@
 package dev.teacode.tmusic.ui
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -21,6 +23,7 @@ internal fun TMusicAppLifecycleEffects(
     checkForAppUpdate: suspend (manual: Boolean) -> Unit,
     goBack: () -> Unit,
 ) {
+    val activity = LocalContext.current as? Activity
     TimedMessageClearEffect(appState.libraryNotice, timeoutMs = 2_500) { current ->
         if (appState.libraryNotice == current) {
             appState.libraryNotice = null
@@ -92,10 +95,11 @@ internal fun TMusicAppLifecycleEffects(
             }
         },
     )
-    BackHandler(enabled = appState.queueOpen) {
-        appState.queueOpen = false
-    }
-    BackHandler(enabled = appState.account != null && appState.backStack.isNotEmpty() && !appState.fullPlayerOpen) {
-        goBack()
+    BackHandler(enabled = appState.account != null) {
+        when {
+            appState.queueOpen -> appState.queueOpen = false
+            appState.backStack.isNotEmpty() && !appState.fullPlayerOpen -> goBack()
+            else -> activity?.moveTaskToBack(true)
+        }
     }
 }

@@ -278,7 +278,14 @@ internal fun MainShell(
         ?.toSet()
         .orEmpty()
     val favoriteTrackIds = (favoritePlaylistTrackIds + knownLikedTrackIds) - knownUnlikedTrackIds
-    val locallyPlayableTrackIds = (tracks + albumTracksById.values.flatten())
+    val offlineIndex = offlineLibraryIndex(
+        playlists = cleanPlaylists,
+        tracks = tracks,
+        offlineAlbumIds = offlineAlbumIds,
+        albumTracksById = albumTracksById,
+        extraTracks = listOfNotNull(playerState.currentTrack),
+    )
+    val locallyPlayableTrackIds = offlineIndex.tracks
         .filter { track -> track.downloadState == DownloadState.Downloaded || track.id in offlinePlayableTrackIds }
         .map { it.id }
         .toSet()
@@ -288,11 +295,8 @@ internal fun MainShell(
     } else {
         emptySet()
     }
-    val downloadedTrackCount = tracks.count { it.downloadState == DownloadState.Downloaded }
-    val downloadedTrackIds = tracks
-        .filter { it.downloadState == DownloadState.Downloaded }
-        .map { it.id }
-        .toSet()
+    val downloadedTrackCount = offlineIndex.downloadedTracks.size
+    val downloadedTrackIds = offlineIndex.downloadedTrackIds
     val visibleTracks = when {
         onlineMode -> tracks
         offlineOnly -> tracks.filter { it.id in offlineAvailableTrackIds }
@@ -305,8 +309,8 @@ internal fun MainShell(
                 playlist.isOfflineEnabled
         }
     }
-    val downloadedAlbums = tracks.downloadedAlbums(offlineAlbumIds)
-    val downloadedAlbumTracksById = tracks.downloadedAlbumTracksById(offlineAlbumIds)
+    val downloadedAlbums = offlineIndex.downloadedTracks.downloadedAlbums(offlineAlbumIds)
+    val downloadedAlbumTracksById = offlineIndex.downloadedTracks.downloadedAlbumTracksById(offlineAlbumIds)
     val visibleArtistSortOption = if (destination.isHomeOverview()) {
         ArtistSortOption.TrackCount
     } else {
@@ -354,22 +358,18 @@ internal fun MainShell(
     }
     val visibleSavedAlbums = when {
         onlineMode -> savedAlbums
-        else -> (savedAlbums.filter { album ->
-            album.savedByCurrentUser || album.isOfflineEnabled || album.id in offlineAlbumIds
-        }.map { album ->
-            album.copy(isOfflineEnabled = album.isOfflineEnabled || album.id in offlineAlbumIds)
-        } + offlineLibraryAlbums)
-            .distinctBy { it.id }
+        else -> savedAlbums
+            .filter { album -> album.savedByCurrentUser }
+            .map { album ->
+                album.copy(isOfflineEnabled = album.isOfflineEnabled || album.id in offlineAlbumIds)
+            }
     }
-    val homeRecentAlbums = if (onlineMode || recentAlbums.isNotEmpty()) {
-        recentAlbums
-    } else {
-        visibleAlbums.take(HOME_RECENT_ALBUM_MAX_COUNT)
-    }
+    val homeRecentAlbums = recentAlbums
     val showHomeLoadingSkeleton = destination.tab == AppTab.Home &&
         destination.homeRoute == HomeRoute.Overview &&
         isLoading &&
-        (syncMode == SyncMode.Syncing || (visibleHomeArtists.isEmpty() && homeRecentAlbums.isEmpty()))
+        visibleHomeArtists.isEmpty() &&
+        homeRecentAlbums.isEmpty()
     val selectedHomeArtist = if (destination.tab == AppTab.Home && destination.homeRoute == HomeRoute.Artist) {
         destination.artistId?.let { artistId ->
             visibleHomeArtists.firstOrNull { it.id == artistId }

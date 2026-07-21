@@ -34,7 +34,10 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -154,6 +157,9 @@ fun FullPlayerScreen(
         } else if (artworkBitmap != null) {
             displayedArtworkBitmap = artworkBitmap
         }
+    }
+    val controlsContrastScrimAlpha = remember(displayedArtworkBitmap) {
+        displayedArtworkBitmap?.controlsContrastScrimAlpha() ?: 0f
     }
     val durationSeconds = currentDurationSeconds
     val progressSeconds = currentProgressSeconds
@@ -384,6 +390,18 @@ fun FullPlayerScreen(
                     .background(MaterialTheme.colorScheme.background.copy(alpha = 0.5f)),
             )
         }
+        if (controlsContrastScrimAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.40f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = controlsContrastScrimAlpha),
+                        ),
+                    ),
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -432,6 +450,38 @@ fun FullPlayerScreen(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+}
+
+private fun ImageBitmap.controlsContrastScrimAlpha(): Float {
+    val bitmap = runCatching { asAndroidBitmap() }.getOrNull() ?: return 0f
+    if (bitmap.width <= 0 || bitmap.height <= 0) {
+        return 0f
+    }
+    val sampleCount = 5
+    val centerX = bitmap.width / 2
+    val centerY = (bitmap.height * 0.78f).toInt().coerceIn(0, bitmap.height - 1)
+    val radiusX = (bitmap.width * 0.05f).toInt().coerceAtLeast(1)
+    val radiusY = (bitmap.height * 0.05f).toInt().coerceAtLeast(1)
+    var luminanceSum = 0f
+    repeat(sampleCount) { yIndex ->
+        val y = (centerY + (yIndex - sampleCount / 2) * radiusY / (sampleCount / 2))
+            .coerceIn(0, bitmap.height - 1)
+        repeat(sampleCount) { xIndex ->
+            val x = (centerX + (xIndex - sampleCount / 2) * radiusX / (sampleCount / 2))
+                .coerceIn(0, bitmap.width - 1)
+            val pixel = bitmap.getPixel(x, y)
+            val red = (pixel shr 16 and 0xFF) / 255f
+            val green = (pixel shr 8 and 0xFF) / 255f
+            val blue = (pixel and 0xFF) / 255f
+            luminanceSum += 0.2126f * red + 0.7152f * green + 0.0722f * blue
+        }
+    }
+    return when (luminanceSum / (sampleCount * sampleCount)) {
+        in 0.70f..1f -> 0.24f
+        in 0.54f..0.70f -> 0.18f
+        in 0.42f..0.54f -> 0.13f
+        else -> 0.08f
     }
 }
 

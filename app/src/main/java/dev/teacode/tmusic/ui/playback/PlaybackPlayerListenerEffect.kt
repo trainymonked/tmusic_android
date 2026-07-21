@@ -67,7 +67,9 @@ internal fun PlaybackPlayerListenerEffect(
                             ) -> {
                         onRequestQueueAdvance()
                     }
-                    queue.canSkip && currentTrack != null -> {
+                    queue.tracks.isNotEmpty() &&
+                        currentTrack != null &&
+                        repeatMode() != PlaybackRepeatMode.Queue -> {
                         onRequestQueueWrapPause()
                     }
                     repeatMode() == PlaybackRepeatMode.Queue && currentTrack != null -> {

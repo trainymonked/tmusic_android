@@ -88,16 +88,12 @@ internal fun playlistDownloadDeletePlan(
 ): CollectionDownloadDeletePlan {
     return collectionDownloadDeletePlan(
         trackIds = playlist.trackIds.toSet(),
-        tracks = tracks,
-        isRequiredByOtherCollection = { trackId ->
-            trackIsRequiredByDownloadedCollection(
-                trackId = trackId,
-                playlists = playlists,
-                albumTracksById = albumTracksById,
-                offlineAlbumIds = offlineAlbumIds,
-                excludingPlaylistId = playlist.id,
-            )
-        },
+        offlineIndex = offlineLibraryIndex(
+            playlists = playlists,
+            tracks = tracks,
+            offlineAlbumIds = offlineAlbumIds,
+            albumTracksById = albumTracksById,
+        ),
     )
 }
 
@@ -109,40 +105,55 @@ internal fun albumDownloadDeletePlan(
     albumTracksById: Map<String, List<Track>>,
     offlineAlbumIds: Set<String>,
 ): CollectionDownloadDeletePlan {
-    val trackIds = (albumTracks + albumTracksById[album.id].orEmpty())
+    val trackIds = (albumTracks + albumTracksById[album.id].orEmpty() + tracks.filter { it.albumId == album.id })
         .map { it.id }
         .toSet()
     return collectionDownloadDeletePlan(
         trackIds = trackIds,
-        tracks = tracks,
-        isRequiredByOtherCollection = { trackId ->
-            trackIsRequiredByDownloadedCollection(
-                trackId = trackId,
-                playlists = playlists,
-                albumTracksById = albumTracksById,
-                offlineAlbumIds = offlineAlbumIds,
-                excludingAlbumId = album.id,
-            )
-        },
+        offlineIndex = offlineLibraryIndex(
+            playlists = playlists,
+            tracks = tracks,
+            offlineAlbumIds = offlineAlbumIds,
+            albumTracksById = albumTracksById,
+            extraTracks = albumTracks,
+        ),
     )
 }
 
 internal fun queuedPlaylistDownloadTrackIds(
     playlist: Playlist,
     tracks: List<Track>,
-): Set<String> = playlist.trackIds
-    .filter { trackId -> tracks.firstOrNull { it.id == trackId }?.downloadState == DownloadState.Queued }
-    .toSet()
+    albumTracksById: Map<String, List<Track>>,
+): Set<String> {
+    val offlineIndex = offlineLibraryIndex(
+        playlists = emptyList(),
+        tracks = tracks,
+        offlineAlbumIds = emptySet(),
+        albumTracksById = albumTracksById,
+    )
+    return playlist.trackIds
+        .filter { trackId -> offlineIndex.tracksById[trackId]?.downloadState == DownloadState.Queued }
+        .toSet()
+}
 
 internal fun queuedAlbumDownloadTrackIds(
     album: LibraryAlbum,
     albumTracks: List<Track>,
     tracks: List<Track>,
     albumTracksById: Map<String, List<Track>>,
-): Set<String> = (albumTracks + albumTracksById[album.id].orEmpty())
-    .map { it.id }
-    .filter { trackId -> tracks.firstOrNull { it.id == trackId }?.downloadState == DownloadState.Queued }
-    .toSet()
+): Set<String> {
+    val offlineIndex = offlineLibraryIndex(
+        playlists = emptyList(),
+        tracks = tracks,
+        offlineAlbumIds = emptySet(),
+        albumTracksById = albumTracksById,
+        extraTracks = albumTracks,
+    )
+    return (albumTracks + albumTracksById[album.id].orEmpty())
+        .map { it.id }
+        .filter { trackId -> offlineIndex.tracksById[trackId]?.downloadState == DownloadState.Queued }
+        .toSet()
+}
 
 internal fun Map<String, Job>.activeDownloadIds(): Set<String> {
     return filterValues { job -> job.isActive }.keys
@@ -169,6 +180,7 @@ internal fun pausePlaylistDownloadAction(
     setPlaylistDownloadJobs: (Map<String, Job>) -> Unit,
     playlists: List<Playlist>,
     tracks: List<Track>,
+    albumTracksById: Map<String, List<Track>>,
     savedAlbums: List<LibraryAlbum>,
     libraryCacheStore: LibraryCacheStore,
     updateTrackDownloadState: (String, DownloadState) -> Unit,
@@ -183,7 +195,7 @@ internal fun pausePlaylistDownloadAction(
         return
     }
     collectionDownloadPauseRegistry.pausePlaylist(playlist.id)
-    val queuedTrackIds = queuedPlaylistDownloadTrackIds(currentPlaylist, tracks)
+    val queuedTrackIds = queuedPlaylistDownloadTrackIds(currentPlaylist, tracks, albumTracksById)
     queuedTrackIds.forEach { trackId -> updateTrackDownloadState(trackId, DownloadState.NotDownloaded) }
     val tracksForCache = tracks.map { track ->
         if (track.id in queuedTrackIds) {
@@ -321,9 +333,17 @@ internal fun deleteAlbumDownloadAction(
             musicRepository.removeDownloadedTrack(trackId)
             updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
         }
+        val removedTrackIds = deletePlan.queuedTrackIds + deletePlan.downloadedTrackIdsToCache
+        val tracksForCache = tracks.map { track ->
+            if (track.id in removedTrackIds) {
+                track.copy(downloadState = DownloadState.NotDownloaded)
+            } else {
+                track
+            }
+        }
         libraryCacheStore.saveLibrary(
             playlists = playlists,
-            tracks = tracks,
+            tracks = tracksForCache,
             savedAlbums = savedAlbums,
         )
         refreshStorageStats()
@@ -730,6 +750,8 @@ internal fun clearDownloadsAction(
     setAlbums: (List<LibraryAlbum>) -> Unit,
     getSavedAlbums: () -> List<LibraryAlbum>,
     setSavedAlbums: (List<LibraryAlbum>) -> Unit,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     getAlbumsByArtist: () -> Map<String, List<LibraryAlbum>>,
     setAlbumsByArtist: (Map<String, List<LibraryAlbum>>) -> Unit,
     getAppearsOnByArtist: () -> Map<String, List<LibraryAlbum>>,
@@ -752,6 +774,7 @@ internal fun clearDownloadsAction(
     offlineLyricsStore: OfflineLyricsStore,
     artworkCacheStore: ArtworkCacheStore,
     libraryCacheStore: LibraryCacheStore,
+    updateTrackDownloadState: (String, DownloadState) -> Unit,
     setLibraryNotice: (String?) -> Unit,
     setLibraryError: (String?) -> Unit,
     refreshStorageStats: () -> Unit,
@@ -768,7 +791,14 @@ internal fun clearDownloadsAction(
         val shouldStopPlayback = currentPlayerState.streamUrl?.startsWith("file:", ignoreCase = true) == true
         val currentPlaylists = getPlaylists()
         val currentTracks = getTracks()
-        val downloadedArtworkKeys = downloadedArtworkKeys(currentPlaylists, currentTracks)
+        val offlineIndex = offlineLibraryIndex(
+            playlists = currentPlaylists,
+            tracks = currentTracks,
+            offlineAlbumIds = getOfflineAlbumIds(),
+            albumTracksById = getAlbumTracksById(),
+            extraTracks = listOfNotNull(currentPlayerState.currentTrack),
+        )
+        val downloadedArtworkKeys = downloadedArtworkKeys(currentPlaylists, offlineIndex.downloadedTracks)
         val downloadedArtworkCacheKeys = artworkCacheKeysFor(downloadedArtworkKeys)
         runCatching {
             musicRepository.clearDownloads(retainedTrackIds = retainedTrackIds)
@@ -785,9 +815,14 @@ internal fun clearDownloadsAction(
             )
             setLyricsByTrackId(
                 getLyricsByTrackId().filterKeys { trackId ->
-                    currentTracks.none { it.id == trackId && it.downloadState == DownloadState.Downloaded }
+                    trackId !in offlineIndex.downloadedTrackIds
                 },
             )
+            offlineIndex.tracks.forEach { track ->
+                if (track.downloadState != DownloadState.NotDownloaded) {
+                    updateTrackDownloadState(track.id, DownloadState.NotDownloaded)
+                }
+            }
             val nextTracks = currentTracks.map { track -> track.copy(downloadState = DownloadState.NotDownloaded) }
             val nextAlbums = getAlbums().map { album -> album.copy(isOfflineEnabled = false) }
             val nextSavedAlbums = getSavedAlbums().map { album -> album.copy(isOfflineEnabled = false) }
@@ -928,42 +963,22 @@ internal fun resumePendingOfflineDownloadsAction(
 
 private fun collectionDownloadDeletePlan(
     trackIds: Set<String>,
-    tracks: List<Track>,
-    isRequiredByOtherCollection: (String) -> Boolean,
+    offlineIndex: OfflineLibraryIndex,
 ): CollectionDownloadDeletePlan {
-    val tracksById = tracks.associateBy { it.id }
     val queuedTrackIds = trackIds
         .filter { trackId ->
-            tracksById[trackId]?.downloadState == DownloadState.Queued &&
-                !isRequiredByOtherCollection(trackId)
+            offlineIndex.tracksById[trackId]?.downloadState == DownloadState.Queued &&
+                !offlineIndex.isRequiredByCollection(trackId)
         }
         .toSet()
     val downloadedTrackIdsToCache = trackIds
         .filter { trackId ->
-            tracksById[trackId]?.downloadState == DownloadState.Downloaded &&
-                !isRequiredByOtherCollection(trackId)
+            offlineIndex.tracksById[trackId]?.downloadState == DownloadState.Downloaded &&
+                !offlineIndex.isRequiredByCollection(trackId)
         }
         .toSet()
     return CollectionDownloadDeletePlan(
         queuedTrackIds = queuedTrackIds,
         downloadedTrackIdsToCache = downloadedTrackIdsToCache,
     )
-}
-
-private fun trackIsRequiredByDownloadedCollection(
-    trackId: String,
-    playlists: List<Playlist>,
-    albumTracksById: Map<String, List<Track>>,
-    offlineAlbumIds: Set<String>,
-    excludingPlaylistId: String? = null,
-    excludingAlbumId: String? = null,
-): Boolean {
-    return playlists.any { playlist ->
-        playlist.id != excludingPlaylistId &&
-            playlist.isOfflineEnabled &&
-            trackId in playlist.trackIds
-    } || offlineAlbumIds.any { albumId ->
-        albumId != excludingAlbumId &&
-            albumTracksById[albumId].orEmpty().any { track -> track.id == trackId }
-    }
 }

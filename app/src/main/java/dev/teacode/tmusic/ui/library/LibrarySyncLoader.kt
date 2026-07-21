@@ -276,6 +276,9 @@ internal fun loadLibraryAction(
                         playlists = mergedLibrary.playlists,
                         tracks = nextTracks,
                         savedAlbums = mergedLibrary.savedAlbums,
+                        homeArtists = loadedState.homeArtists,
+                        recentAlbums = loadedState.recentAlbums,
+                        databaseTrackCount = loadedState.trackCount,
                     )
                 }
                 setSyncMode(SyncMode.Online)

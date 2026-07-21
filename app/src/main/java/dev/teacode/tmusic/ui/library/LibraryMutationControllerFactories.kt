@@ -94,6 +94,8 @@ internal fun createPlaylistMutationController(
     getTracks = { appState.tracks },
     setTracks = { appState.tracks = it },
     getSavedAlbums = { appState.savedAlbums },
+    getOfflineAlbumIds = { appState.offlineAlbumIds },
+    getAlbumTracksById = { appState.albumTracksById },
     setAccessToken = { appState.accessToken = it },
     enqueueLibraryMutation = enqueueLibraryMutation,
     saveLibraryCache = saveLibraryCache,

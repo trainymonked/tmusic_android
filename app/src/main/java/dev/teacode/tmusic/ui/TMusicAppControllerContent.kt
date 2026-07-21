@@ -179,8 +179,12 @@ internal fun TMusicAppControllerContent(
             )
         }
         val offlinePlayableTrackIds = remember(tracks, albumTracksById) {
-            (tracks + albumTracksById.values.flatten())
-                .distinctBy { track -> track.id }
+            offlineLibraryIndex(
+                playlists = emptyList(),
+                tracks = tracks,
+                offlineAlbumIds = emptySet(),
+                albumTracksById = albumTracksById,
+            ).tracks
                 .filter { track ->
                     track.downloadState == DownloadState.Downloaded ||
                         musicRepository.localPlaybackUrl(track.id) != null ||
@@ -382,6 +386,9 @@ internal fun TMusicAppControllerContent(
             playlists = playlists,
             tracks = tracks,
             savedAlbums = savedAlbums,
+            homeArtists = homeArtists,
+            recentAlbums = recentAlbums,
+            databaseTrackCount = databaseTrackCount,
         )
     }
 
@@ -477,6 +484,16 @@ internal fun TMusicAppControllerContent(
     ) {
         artworkLyricsActionHost.loadArtwork(artworkKey, imageSize)
     }
+
+    HomeArtworkPreloadEffect(
+        artists = homeArtists,
+        recentAlbums = recentAlbums,
+        getArtworkBitmaps = { artworkBitmaps },
+        putArtworkBitmap = { key, bitmap -> artworkBitmaps[key] = bitmap },
+        getArtworkLoadsInProgress = { artworkLoadsInProgress },
+        setArtworkLoadsInProgress = { artworkLoadsInProgress = it },
+        cacheArtwork = ::cacheArtwork,
+    )
 
     fun refreshArtwork(
         artworkKey: String,

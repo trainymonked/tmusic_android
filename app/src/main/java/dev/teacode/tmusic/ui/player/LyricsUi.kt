@@ -47,6 +47,7 @@ internal val LocalCenterSyncedLyrics = staticCompositionLocalOf { true }
 
 @Composable
 fun LyricsBlock(
+    trackId: String,
     lyrics: TrackLyrics?,
     lyricsUnavailable: Boolean,
     lyricsLoading: Boolean,
@@ -89,6 +90,10 @@ fun LyricsBlock(
         lyrics?.instrumental == true ||
         (lyrics != null && syncedLines.isEmpty() && plainLyrics.isBlank())
     val hasPlainOnly = syncedLines.isEmpty() && plainLyrics.isNotBlank()
+
+    LaunchedEffect(trackId) {
+        fullLyricsListState.scrollToItem(0)
+    }
 
     LaunchedEffect(syncedLines, isPlaying, progressSeconds, currentPlaybackPositionMs) {
         if (syncedLines.isEmpty()) {

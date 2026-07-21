@@ -37,6 +37,8 @@ internal suspend fun cacheArtworkAction(
     getSimilarArtistsByArtist: () -> Map<String, List<LibraryArtist>>,
     getPlaylists: () -> List<Playlist>,
     getTracks: () -> List<Track>,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     getArtworkLoadsInProgress: () -> Set<String>,
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
@@ -88,8 +90,16 @@ internal suspend fun cacheArtworkAction(
     val bitmap = decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
     val playlists = getPlaylists()
     val tracks = getTracks()
+    val offlineAlbumIds = getOfflineAlbumIds()
+    val albumTracksById = getAlbumTracksById()
     val downloadedKeys = withContext(Dispatchers.Default) {
-        downloadedArtworkCacheKeys(playlists, tracks)
+        val offlineIndex = offlineLibraryIndex(
+            playlists = playlists,
+            tracks = tracks,
+            offlineAlbumIds = offlineAlbumIds,
+            albumTracksById = albumTracksById,
+        )
+        downloadedArtworkCacheKeys(playlists, offlineIndex.downloadedTracks)
     }
     artworkCacheStore.trimToLimit(
         maxBytes = ARTWORK_CACHE_LIMIT_BYTES,
@@ -210,6 +220,8 @@ internal fun loadProfileAvatarAction(
     setProfileAvatarBitmap: (ImageBitmap?) -> Unit,
     getPlaylists: () -> List<Playlist>,
     getTracks: () -> List<Track>,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     getArtworkLoadsInProgress: () -> Set<String>,
     artworkCacheStore: ArtworkCacheStore,
     cachedArtworkBitmap: suspend (String, ArtworkImageSize) -> ImageBitmap?,
@@ -235,8 +247,16 @@ internal fun loadProfileAvatarAction(
                 val cachedPath = artworkCacheStore.cache(avatarCacheKey, avatarUrl)
                 val playlists = getPlaylists()
                 val tracks = getTracks()
+                val offlineAlbumIds = getOfflineAlbumIds()
+                val albumTracksById = getAlbumTracksById()
                 val downloadedKeys = withContext(Dispatchers.Default) {
-                    downloadedArtworkCacheKeys(playlists, tracks)
+                    val offlineIndex = offlineLibraryIndex(
+                        playlists = playlists,
+                        tracks = tracks,
+                        offlineAlbumIds = offlineAlbumIds,
+                        albumTracksById = albumTracksById,
+                    )
+                    downloadedArtworkCacheKeys(playlists, offlineIndex.downloadedTracks)
                 }
                 artworkCacheStore.trimToLimit(
                     maxBytes = ARTWORK_CACHE_LIMIT_BYTES,

@@ -163,6 +163,8 @@ internal fun createStorageController(
     setAlbums = { appState.albums = it },
     getSavedAlbums = { appState.savedAlbums },
     setSavedAlbums = { appState.savedAlbums = it },
+    getOfflineAlbumIds = { appState.offlineAlbumIds },
+    getAlbumTracksById = { appState.albumTracksById },
     getAlbumsByArtist = { appState.albumsByArtist },
     setAlbumsByArtist = { appState.albumsByArtist = it },
     getAppearsOnByArtist = { appState.appearsOnByArtist },

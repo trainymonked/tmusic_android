@@ -111,6 +111,7 @@ private fun FullPlayerArtworkSectionContent(
         )
         if (showLyrics) {
             LyricsBlock(
+                trackId = track.id,
                 lyrics = lyrics,
                 lyricsUnavailable = lyricsUnavailable,
                 lyricsLoading = lyricsLoading,

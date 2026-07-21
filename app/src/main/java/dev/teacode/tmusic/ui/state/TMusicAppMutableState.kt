@@ -113,10 +113,12 @@ internal class TMusicAppMutableState(
     val activePlayEventState: MutableState<ActivePlayEvent?> = mutableStateOf(initialState.activePlayEvent)
     var playlists by mutableStateOf(initialState.cachedLibrary.playlists.sanitizeClientPlaylists())
     var tracks by mutableStateOf(initialState.tracks)
-    var recentAlbums by mutableStateOf<List<LibraryAlbum>>(emptyList())
-    var databaseTrackCount by mutableStateOf<Int?>(null)
+    var recentAlbums by mutableStateOf(initialState.cachedLibrary.recentAlbums)
+    var databaseTrackCount by mutableStateOf(initialState.cachedLibrary.databaseTrackCount)
     var offlineAlbumIds by mutableStateOf(userPreferencesStore.offlineAlbumIds())
-    var homeArtists by mutableStateOf(initialState.tracks.downloadedArtists())
+    var homeArtists by mutableStateOf(
+        initialState.cachedLibrary.homeArtists.ifEmpty { initialState.tracks.downloadedArtists() },
+    )
     var artists by mutableStateOf(initialState.tracks.downloadedArtists())
     var albums by mutableStateOf(initialState.tracks.downloadedAlbums(offlineAlbumIds))
     var savedAlbums by mutableStateOf(

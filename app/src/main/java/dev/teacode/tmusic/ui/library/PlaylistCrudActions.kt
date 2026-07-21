@@ -3,6 +3,7 @@ package dev.teacode.tmusic.ui
 import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.RemoteAuthRepository
 import dev.teacode.tmusic.data.RemoteMusicRepository
+import dev.teacode.tmusic.domain.DownloadState
 import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
@@ -145,8 +146,12 @@ internal fun deletePlaylistAction(
     setPlaylistPickerPlaylists: (List<Playlist>) -> Unit,
     getTracks: () -> List<Track>,
     getSavedAlbums: () -> List<LibraryAlbum>,
+    getOfflineAlbumIds: () -> Set<String>,
+    getAlbumTracksById: () -> Map<String, List<Track>>,
     musicRepository: RemoteMusicRepository,
     libraryCacheStore: LibraryCacheStore,
+    updateTrackDownloadState: (String, DownloadState) -> Unit,
+    refreshStorageStats: () -> Unit,
     refreshAccessToken: () -> String?,
     setAccessToken: (String?) -> Unit,
     enqueueLibraryMutation: (String, JSONObject) -> Unit,
@@ -159,10 +164,27 @@ internal fun deletePlaylistAction(
         return
     }
     if (!canUseServerRequests()) {
-        setPlaylists(getPlaylists().filterNot { it.id == playlist.id })
+        val currentPlaylist = getPlaylists().firstOrNull { it.id == playlist.id } ?: playlist
+        val nextPlaylists = getPlaylists().filterNot { it.id == playlist.id }
+        setPlaylists(nextPlaylists)
         setPlaylistPickerPlaylists(getPlaylistPickerPlaylists().filterNot { it.id == playlist.id })
         enqueueLibraryMutation("playlist.delete", JSONObject().put("playlistId", playlist.id))
         saveLibraryCache()
+        if (currentPlaylist.isOfflineEnabled) {
+            scope.launch {
+                removePlaylistDownloadsNoLongerRequired(
+                    playlist = currentPlaylist,
+                    playlists = nextPlaylists,
+                    tracks = getTracks(),
+                    offlineAlbumIds = getOfflineAlbumIds(),
+                    albumTracksById = getAlbumTracksById(),
+                    musicRepository = musicRepository,
+                    updateTrackDownloadState = updateTrackDownloadState,
+                )
+                saveLibraryCache()
+                refreshStorageStats()
+            }
+        }
         if (destination.playlistId == playlist.id) {
             navigateTo(AppDestination(tab = AppTab.Library))
         }
@@ -175,14 +197,27 @@ internal fun deletePlaylistAction(
             musicRepository.deletePlaylist(playlist.id)
         }.onSuccess {
             setAccessToken(refreshAccessToken())
+            val currentPlaylist = getPlaylists().firstOrNull { it.id == playlist.id } ?: playlist
             val nextPlaylists = getPlaylists().filterNot { it.id == playlist.id }
             setPlaylists(nextPlaylists)
             setPlaylistPickerPlaylists(getPlaylistPickerPlaylists().filterNot { it.id == playlist.id })
+            if (currentPlaylist.isOfflineEnabled) {
+                removePlaylistDownloadsNoLongerRequired(
+                    playlist = currentPlaylist,
+                    playlists = nextPlaylists,
+                    tracks = getTracks(),
+                    offlineAlbumIds = getOfflineAlbumIds(),
+                    albumTracksById = getAlbumTracksById(),
+                    musicRepository = musicRepository,
+                    updateTrackDownloadState = updateTrackDownloadState,
+                )
+            }
             libraryCacheStore.saveLibrary(
                 playlists = nextPlaylists,
                 tracks = getTracks(),
                 savedAlbums = getSavedAlbums(),
             )
+            refreshStorageStats()
             if (destination.playlistId == playlist.id) {
                 navigateTo(AppDestination(tab = AppTab.Library))
             }
@@ -190,6 +225,31 @@ internal fun deletePlaylistAction(
             markServerUnavailable(error)
             setLibraryError(error.userMessage())
         }
+    }
+}
+
+private suspend fun removePlaylistDownloadsNoLongerRequired(
+    playlist: Playlist,
+    playlists: List<Playlist>,
+    tracks: List<Track>,
+    offlineAlbumIds: Set<String>,
+    albumTracksById: Map<String, List<Track>>,
+    musicRepository: RemoteMusicRepository,
+    updateTrackDownloadState: (String, DownloadState) -> Unit,
+) {
+    val deletePlan = playlistDownloadDeletePlan(
+        playlist = playlist,
+        playlists = playlists,
+        tracks = tracks,
+        albumTracksById = albumTracksById,
+        offlineAlbumIds = offlineAlbumIds,
+    )
+    deletePlan.queuedTrackIds.forEach { trackId ->
+        updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
+    }
+    deletePlan.downloadedTrackIdsToCache.forEach { trackId ->
+        musicRepository.removeDownloadedTrack(trackId)
+        updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
     }
 }
 
