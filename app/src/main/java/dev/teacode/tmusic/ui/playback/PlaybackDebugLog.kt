@@ -1,12 +1,6 @@
 package dev.teacode.tmusic.ui
 
-import android.util.Log
-
-private const val PLAYBACK_LOG_TAG = "TMusicPlayback"
-
-internal fun logPlaybackDebug(message: String) {
-    Log.d(PLAYBACK_LOG_TAG, message)
-}
+internal fun logPlaybackDebug(message: String) = Unit
 
 internal fun PlaybackQueue.debugSummary(): String {
     val current = tracks.getOrNull(currentIndex)

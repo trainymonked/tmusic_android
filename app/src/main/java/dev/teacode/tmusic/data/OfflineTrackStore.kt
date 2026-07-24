@@ -30,6 +30,10 @@ class OfflineTrackStore(context: Context) {
             ?.takeIf { File(it.localPath).exists() }
     }
 
+    fun downloadedManifests(): List<OfflineTrackManifest> {
+        return preferences.all.keys.mapNotNull(::manifest)
+    }
+
     fun localPlaybackUrl(trackId: String): String? {
         val manifest = manifest(trackId) ?: return null
         return File(manifest.localPath).toURI().toString()
@@ -221,6 +225,17 @@ class OfflineTrackStore(context: Context) {
         )
         save(manifest)
         manifest
+    }
+
+    suspend fun removeDownload(trackId: String) = withContext(Dispatchers.IO) {
+        preferences.getString(trackId, null)
+            ?.let { json -> runCatching { JSONObject(json).toManifest() }.getOrNull() }
+            ?.localPath
+            ?.let(::File)
+            ?.delete()
+        preferences.edit().remove(trackId).apply()
+        File(tracksDirectory, "${trackId.safeFileName()}.bin").delete()
+        File(tracksDirectory, "${trackId.safeFileName()}.tmp").delete()
     }
 
     private fun save(manifest: OfflineTrackManifest) {

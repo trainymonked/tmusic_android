@@ -1,6 +1,5 @@
 package dev.teacode.tmusic.data
 
-import android.util.Log
 import dev.teacode.tmusic.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
@@ -23,35 +22,20 @@ data class AppUpdateInfo(
     val blockingScopes: List<String> = emptyList(),
 )
 
-private const val APP_UPDATE_LOG_TAG = "TMusicUpdate"
-
 class AppUpdateChecker(
     private val loadConfig: suspend () -> AppUpdateInfo?,
     private val githubRepository: String,
 ) {
     suspend fun latestUpdate(currentVersion: String): AppUpdateInfo? = withContext(Dispatchers.IO) {
-        Log.d(
-            APP_UPDATE_LOG_TAG,
-            "check start currentVersion=$currentVersion currentCode=${BuildConfig.VERSION_CODE}",
-        )
         val serverPolicy = runCatching { loadConfig() }
             .getOrElse { error ->
                 if (error is CancellationException) throw error
-                Log.w(APP_UPDATE_LOG_TAG, "config check failed", error)
                 null
-            }
-            ?.also { update ->
-                Log.d(
-                    APP_UPDATE_LOG_TAG,
-                    "config check candidate version=${update.version} latestCode=${update.latestVersionCode} " +
-                        "minCode=${update.minSupportedVersionCode} force=${update.forceUpdate}",
-                )
             }
         val githubUpdate = runCatching {
             fetchLatestGithubReleaseUpdate(githubRepository)
         }.getOrElse { error ->
             if (error is CancellationException) throw error
-            Log.w(APP_UPDATE_LOG_TAG, "github release check failed repository=$githubRepository", error)
             null
         }
         val candidate = githubUpdate?.withServerPolicy(serverPolicy)
@@ -59,10 +43,6 @@ class AppUpdateChecker(
         candidate
             ?.takeIf { update -> update.isAvailableForCurrentApp(currentVersion) }
             ?.enforcedForCurrentApp()
-            ?: run {
-                Log.d(APP_UPDATE_LOG_TAG, "check finished: no newer update")
-                null
-            }
     }
 }
 
@@ -120,8 +100,6 @@ private fun AppUpdateInfo.withGithubReleaseNotesIfNeeded(): AppUpdateInfo {
     val apiUrl = githubReleaseApiUrl() ?: return this
     val notes = runCatching {
         fetchGithubReleaseNotes(apiUrl)
-    }.onFailure { error ->
-        Log.w(APP_UPDATE_LOG_TAG, "release notes fetch failed url=$apiUrl", error)
     }.getOrNull()?.takeIf { it.isNotBlank() }
         ?: return this
     return copy(changelog = notes)
@@ -141,7 +119,6 @@ private fun AppUpdateInfo.withServerPolicy(policy: AppUpdateInfo?): AppUpdateInf
 private fun fetchLatestGithubReleaseUpdate(repository: String): AppUpdateInfo? {
     val normalizedRepository = repository.trim().removePrefix("https://github.com/").trim('/')
     if (normalizedRepository.isBlank() || "/" !in normalizedRepository) {
-        Log.w(APP_UPDATE_LOG_TAG, "github release check skipped: invalid repository=$repository")
         return null
     }
     val apiUrl = "https://api.github.com/repos/$normalizedRepository/releases/latest"
@@ -219,7 +196,6 @@ private fun fetchGithubRelease(apiUrl: String): GithubRelease? {
     }
     return try {
         if (connection.responseCode !in 200..299) {
-            Log.w(APP_UPDATE_LOG_TAG, "release notes fetch http=${connection.responseCode} url=$apiUrl")
             return null
         }
         val payload = connection.inputStream.bufferedReader().use { it.readText() }

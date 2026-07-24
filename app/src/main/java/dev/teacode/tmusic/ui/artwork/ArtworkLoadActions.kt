@@ -33,6 +33,7 @@ internal suspend fun cacheArtworkAction(
     canUseMediaServerRequests: () -> Boolean,
     getHomeArtists: () -> List<LibraryArtist>,
     getArtists: () -> List<LibraryArtist>,
+    getArtistChoices: () -> List<LibraryArtist>,
     getSearchResults: () -> LibrarySearchResults,
     getSimilarArtistsByArtist: () -> Map<String, List<LibraryArtist>>,
     getPlaylists: () -> List<Playlist>,
@@ -68,6 +69,7 @@ internal suspend fun cacheArtworkAction(
                     val knownArtistHasId = (
                         getHomeArtists() +
                             getArtists() +
+                            getArtistChoices() +
                             getSearchResults().artists +
                             getSimilarArtistsByArtist().values.flatten()
                         ).any { it.id == artistId }
@@ -90,6 +92,7 @@ internal suspend fun cacheArtworkAction(
     val bitmap = decodeArtworkBitmap(cachedPath, imageSize.maxSizePx)
     val playlists = getPlaylists()
     val tracks = getTracks()
+    val homeArtists = getHomeArtists()
     val offlineAlbumIds = getOfflineAlbumIds()
     val albumTracksById = getAlbumTracksById()
     val downloadedKeys = withContext(Dispatchers.Default) {
@@ -103,7 +106,8 @@ internal suspend fun cacheArtworkAction(
     }
     artworkCacheStore.trimToLimit(
         maxBytes = ARTWORK_CACHE_LIMIT_BYTES,
-        keysToKeep = downloadedKeys + getArtworkLoadsInProgress() + cacheKey,
+        keysToKeep = downloadedKeys + homeArtworkCacheKeys(homeArtists) +
+            getArtworkLoadsInProgress() + cacheKey,
     )
     refreshStorageStats()
     return bitmap
@@ -218,6 +222,7 @@ internal fun loadProfileAvatarAction(
     setProfileAvatarLoadKey: (String?) -> Unit,
     getProfileAvatarBitmap: () -> ImageBitmap?,
     setProfileAvatarBitmap: (ImageBitmap?) -> Unit,
+    getHomeArtists: () -> List<LibraryArtist>,
     getPlaylists: () -> List<Playlist>,
     getTracks: () -> List<Track>,
     getOfflineAlbumIds: () -> Set<String>,
@@ -247,6 +252,7 @@ internal fun loadProfileAvatarAction(
                 val cachedPath = artworkCacheStore.cache(avatarCacheKey, avatarUrl)
                 val playlists = getPlaylists()
                 val tracks = getTracks()
+                val homeArtists = getHomeArtists()
                 val offlineAlbumIds = getOfflineAlbumIds()
                 val albumTracksById = getAlbumTracksById()
                 val downloadedKeys = withContext(Dispatchers.Default) {
@@ -260,7 +266,8 @@ internal fun loadProfileAvatarAction(
                 }
                 artworkCacheStore.trimToLimit(
                     maxBytes = ARTWORK_CACHE_LIMIT_BYTES,
-                    keysToKeep = downloadedKeys + getArtworkLoadsInProgress() + avatarCacheKey,
+                    keysToKeep = downloadedKeys + homeArtworkCacheKeys(homeArtists) +
+                        getArtworkLoadsInProgress() + avatarCacheKey,
                 )
                 refreshStorageStats()
                 decodeArtworkBitmap(cachedPath, ArtworkImageSize.TrackList.maxSizePx)

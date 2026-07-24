@@ -177,6 +177,11 @@ data class TrackDownloadInfo(
     val checksumSha256: String?,
 )
 
+data class TrackDownloadUpdates(
+    val tracks: List<TrackDownloadInfo>,
+    val removedTrackIds: Set<String>,
+)
+
 data class OfflineTrackManifest(
     val trackId: String,
     val etag: String?,

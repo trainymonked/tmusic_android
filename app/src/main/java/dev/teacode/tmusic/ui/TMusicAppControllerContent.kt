@@ -520,7 +520,7 @@ internal fun TMusicAppControllerContent(
     fun resolveCachedArtist(artistName: String): LibraryArtist? {
         return resolveCachedArtist(
             artistName = artistName,
-            artists = artists,
+            artists = homeArtists + artists,
             searchResults = searchResults,
             similarArtistsByArtist = similarArtistsByArtist,
         )
@@ -1653,6 +1653,32 @@ internal fun TMusicAppControllerContent(
         offlineSettingsActionHost.setUseLocalBackend(enabled)
     }
 
+    suspend fun refreshSessionIfNeeded(): Boolean {
+        val result = runCatching {
+            authRepository.refreshSessionIfNeeded()
+        }
+        result.onSuccess { refreshed ->
+            if (refreshed) {
+                accessToken = authRepository.accessToken()
+            }
+        }.onFailure(::markServerUnavailable)
+        return result.isSuccess
+    }
+
+    suspend fun refreshChangedDownloads() {
+        if (appState.account?.canPlayMedia == false) {
+            return
+        }
+        val result = musicRepository.refreshChangedDownloads()
+        result.removedTrackIds.forEach { trackId ->
+            updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
+        }
+        if (result.refreshedTrackIds.isNotEmpty() || result.removedTrackIds.isNotEmpty()) {
+            saveLibraryCache()
+            refreshStorageStats()
+        }
+    }
+
     TMusicAppLifecycleEffects(
         appState = appState,
         scope = scope,
@@ -1662,6 +1688,8 @@ internal fun TMusicAppControllerContent(
         resumePendingOfflineDownloads = ::resumePendingOfflineDownloads,
         pauseCollectionDownloadsForNetworkPolicy = ::pauseCollectionDownloadsForNetworkPolicy,
         canUseServerRequests = ::canUseServerRequests,
+        refreshSessionIfNeeded = ::refreshSessionIfNeeded,
+        refreshChangedDownloads = ::refreshChangedDownloads,
         syncPendingPlayEvents = ::syncPendingPlayEvents,
         restoreNowPlaying = ::restoreNowPlaying,
         checkForAppUpdate = appUpdateHost::checkForAppUpdate,

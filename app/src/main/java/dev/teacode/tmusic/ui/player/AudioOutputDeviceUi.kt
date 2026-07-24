@@ -42,13 +42,14 @@ internal fun rememberAudioOutputDevice(): AudioOutputDevice {
     var bluetoothNameAccessGranted by remember(context) {
         mutableStateOf(context.hasBluetoothNameAccess())
     }
+    var outputDevice by remember(audioManager, mediaRouter, bluetoothNameAccessGranted) {
+        mutableStateOf(resolveAudioOutputDevice(context, audioManager, mediaRouter))
+    }
     val bluetoothNamePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         bluetoothNameAccessGranted = granted
-    }
-    var outputDevice by remember(audioManager, mediaRouter, bluetoothNameAccessGranted) {
-        mutableStateOf(resolveAudioOutputDevice(context, audioManager, mediaRouter))
+        outputDevice = resolveAudioOutputDevice(context, audioManager, mediaRouter)
     }
 
     LaunchedEffect(outputDevice.isBluetooth, bluetoothNameAccessGranted) {
@@ -121,6 +122,15 @@ private fun resolveAudioOutputDevice(
     mediaRouter: MediaRouter,
 ): AudioOutputDevice {
     val bluetoothRouteName = mediaRouter.selectedBluetoothRouteName(context)
+    val outputDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+    // MediaRouter knows about a selected Bluetooth route even before the app has
+    // an active playback configuration. Prefer it over the platform's temporary
+    // speaker fallback so the device name appears as soon as permission is granted.
+    if (bluetoothRouteName != null) {
+        val bluetoothDevice = outputDevices.firstOrNull(AudioDeviceInfo::isBluetoothAudioOutput)
+        return bluetoothDevice?.toAudioOutputDevice(context, bluetoothRouteName)
+            ?: AudioOutputDevice(bluetoothRouteName, usesHeadphones = true, isBluetooth = true)
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val mediaAttributes = android.media.AudioAttributes.Builder()
             .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
@@ -151,13 +161,6 @@ private fun resolveAudioOutputDevice(
                 phoneAudioOutputDevice()
             }
         }
-    }
-
-    val outputDevices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
-    if (bluetoothRouteName != null) {
-        val bluetoothDevice = outputDevices.firstOrNull(AudioDeviceInfo::isBluetoothAudioOutput)
-        return bluetoothDevice?.toAudioOutputDevice(context, bluetoothRouteName)
-            ?: AudioOutputDevice(bluetoothRouteName, usesHeadphones = true, isBluetooth = true)
     }
 
     @Suppress("DEPRECATION")

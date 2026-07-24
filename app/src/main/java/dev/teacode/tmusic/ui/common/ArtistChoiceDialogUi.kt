@@ -60,19 +60,18 @@ fun ArtistChoiceDialog(
             shape = RoundedCornerShape(8.dp),
             color = MaterialTheme.colorScheme.surfaceContainer,
         ) {
-            Column(modifier = Modifier.padding(top = 10.dp)) {
+            Column(modifier = Modifier.padding(24.dp)) {
                 Text(
                     text = "Go to artist",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(bottom = 16.dp),
                 )
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 300.dp)
-                        .padding(horizontal = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                        .heightIn(max = 300.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     items(artists, key = { it.id }) { artist ->
                         ArtistChoiceRow(
@@ -88,7 +87,7 @@ fun ArtistChoiceDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 8.dp, end = 8.dp, top = 2.dp),
+                        .padding(top = 12.dp),
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(
@@ -114,7 +113,7 @@ private fun ArtistChoiceRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

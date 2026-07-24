@@ -1,6 +1,5 @@
 package dev.teacode.tmusic.ui
 
-import android.util.Log
 import dev.teacode.tmusic.data.LibraryCacheStore
 import dev.teacode.tmusic.data.RemoteMusicRepository
 import dev.teacode.tmusic.data.TMusicApiException
@@ -22,8 +21,6 @@ internal fun toggleFavoriteTrackAction(
     getTracks: () -> List<Track>,
     setTracks: (List<Track>) -> Unit,
     getSavedAlbums: () -> List<LibraryAlbum>,
-    getOfflineAlbumIds: () -> Set<String>,
-    getAlbumTracksById: () -> Map<String, List<Track>>,
     musicRepository: RemoteMusicRepository,
     libraryCacheStore: LibraryCacheStore,
     refreshAccessToken: () -> String?,
@@ -31,7 +28,6 @@ internal fun toggleFavoriteTrackAction(
     mergePlaylistPickerMetadata: (List<Playlist>) -> Unit,
     updateKnownTrackLikedState: (String, Boolean) -> Unit,
     updateTrackDownloadState: (String, DownloadState) -> Unit,
-    onTrackMovedToCache: (String, String?) -> Unit,
     ensureTrackDownloaded: suspend (Track) -> Unit,
     cacheDownloadedAssets: suspend (Track) -> Unit,
     refreshStorageStats: () -> Unit,
@@ -44,7 +40,6 @@ internal fun toggleFavoriteTrackAction(
     setLibraryError: (String?) -> Unit,
 ) {
     if (!canUseServerRequests()) {
-        Log.d(FAVORITE_TRACK_LOG_TAG, "toggle local-only track=${track.id}: server requests are unavailable")
         val favoritePlaylist = getPlaylists().favoritePlaylistForLocalMutation()
         val wasFavorite = currentFavoriteState(
             track = track,
@@ -71,29 +66,6 @@ internal fun toggleFavoriteTrackAction(
                 .put("liked", !wasFavorite),
         )
         saveLibraryCache()
-        if (wasFavorite) {
-            scope.launch {
-                runCatching {
-                    cacheDownloadedTrackIfUnretained(
-                        track = track,
-                        playlists = getPlaylists(),
-                        tracks = getTracks(),
-                        offlineAlbumIds = getOfflineAlbumIds(),
-                        albumTracksById = getAlbumTracksById(),
-                        musicRepository = musicRepository,
-                        updateTrackDownloadState = updateTrackDownloadState,
-                        onTrackMovedToCache = onTrackMovedToCache,
-                    )
-                }.onSuccess { movedToCache ->
-                    if (movedToCache) {
-                        refreshStorageStats()
-                        saveLibraryCache()
-                    }
-                }.onFailure { error ->
-                    setLibraryError(error.userMessage())
-                }
-            }
-        }
         return
     }
 
@@ -107,7 +79,6 @@ internal fun toggleFavoriteTrackAction(
     )
     val shouldBeFavorite = !wasFavorite
     if (track.id in getFavoriteSyncTrackIds()) {
-        Log.d(FAVORITE_TRACK_LOG_TAG, "skip toggle track=${track.id}: favorite sync is already running")
         return
     }
     setFavoriteSyncTrackIds(getFavoriteSyncTrackIds() + track.id)
@@ -153,7 +124,6 @@ internal fun toggleFavoriteTrackAction(
 
     scope.launch {
         try {
-            Log.d(FAVORITE_TRACK_LOG_TAG, "sync favorite track=${track.id} liked=$shouldBeFavorite")
             setLibraryError(null)
             runCatching {
                 syncFavoriteTrackState(
@@ -171,26 +141,6 @@ internal fun toggleFavoriteTrackAction(
                     .updateOrAppendPlaylist(updatedPlaylist)
                 setPlaylists(nextPlaylists)
                 updateKnownTrackLikedState(track.id, track.id in updatedPlaylist.trackIds)
-                if (!shouldBeFavorite) {
-                    runCatching {
-                        cacheDownloadedTrackIfUnretained(
-                            track = track,
-                            playlists = nextPlaylists,
-                            tracks = getTracks(),
-                            offlineAlbumIds = getOfflineAlbumIds(),
-                            albumTracksById = getAlbumTracksById(),
-                            musicRepository = musicRepository,
-                            updateTrackDownloadState = updateTrackDownloadState,
-                            onTrackMovedToCache = onTrackMovedToCache,
-                        )
-                    }.onSuccess { movedToCache ->
-                        if (movedToCache) {
-                            refreshStorageStats()
-                        }
-                    }.onFailure { error ->
-                        setLibraryError(error.userMessage())
-                    }
-                }
                 libraryCacheStore.saveLibrary(
                     playlists = nextPlaylists,
                     tracks = getTracks(),
@@ -222,37 +172,6 @@ internal fun toggleFavoriteTrackAction(
             setFavoriteSyncTrackIds(getFavoriteSyncTrackIds() - track.id)
         }
     }
-}
-
-private suspend fun cacheDownloadedTrackIfUnretained(
-    track: Track,
-    playlists: List<Playlist>,
-    tracks: List<Track>,
-    offlineAlbumIds: Set<String>,
-    albumTracksById: Map<String, List<Track>>,
-    musicRepository: RemoteMusicRepository,
-    updateTrackDownloadState: (String, DownloadState) -> Unit,
-    onTrackMovedToCache: (String, String?) -> Unit,
-): Boolean {
-    val offlineIndex = offlineLibraryIndex(
-        playlists = playlists,
-        tracks = tracks,
-        offlineAlbumIds = offlineAlbumIds,
-        albumTracksById = albumTracksById,
-        extraTracks = listOf(track),
-    )
-    val knownTrack = offlineIndex.tracksById[track.id] ?: track
-    if (knownTrack.downloadState != DownloadState.Downloaded) {
-        return false
-    }
-    if (offlineIndex.isRequiredByCollection(track.id)) {
-        return false
-    }
-
-    musicRepository.removeDownloadedTrack(track.id)
-    updateTrackDownloadState(track.id, DownloadState.NotDownloaded)
-    onTrackMovedToCache(track.id, musicRepository.cachedPlaybackUrl(track.id))
-    return true
 }
 
 private fun currentFavoriteState(
@@ -327,13 +246,6 @@ private suspend fun syncFavoriteTrackState(
         playlistTrackIds = favoritePlaylist.playlistTrackIdsForTrack(track.id)
     }
     if (playlistTrackIds.isEmpty()) {
-        Log.d(
-            FAVORITE_TRACK_LOG_TAG,
-            "Favorite track ${track.id} is already absent on server playlist ${favoritePlaylist.id}; " +
-                "no playlistTrackId returned after full payload load. " +
-                "trackIds=${favoritePlaylist.trackIds.size} playlistTrackIds=${favoritePlaylist.playlistTrackIds.size} " +
-                "playlistTrackIdsByTrackId=${favoritePlaylist.playlistTrackIdsByTrackId.size}",
-        )
         return serverOptimisticPlaylist
     }
     var nextPlaylist = serverOptimisticPlaylist
@@ -361,8 +273,6 @@ private suspend fun syncFavoriteTrackState(
 private fun TMusicApiException.isNotFound(): Boolean {
     return statusCode == 404 || message?.contains("not found", ignoreCase = true) == true
 }
-
-private const val FAVORITE_TRACK_LOG_TAG = "TMusicFavorites"
 
 private suspend fun findOrLoadFavoritesPlaylistAction(
     getPlaylists: () -> List<Playlist>,

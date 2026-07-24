@@ -15,6 +15,11 @@ import dev.teacode.tmusic.domain.OfflineTrackManifest
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
 import java.net.HttpURLConnection
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 class RemoteAuthRepository(
     private val apiClient: TMusicApiClient,
@@ -30,6 +35,10 @@ class RemoteAuthRepository(
 
     fun accessToken(): String? {
         return sessionStore.tokens()?.accessToken
+    }
+
+    suspend fun refreshSessionIfNeeded(): Boolean {
+        return apiClient.refreshSessionIfNeeded()
     }
 
     fun setApiBaseUrl(baseUrl: String) {
@@ -84,12 +93,19 @@ class RemoteAuthRepository(
     }
 }
 
+data class DownloadedTracksRefresh(
+    val refreshedTrackIds: Set<String>,
+    val removedTrackIds: Set<String>,
+)
+
 class RemoteMusicRepository(
     private val apiClient: TMusicApiClient,
     private val offlineTrackStore: OfflineTrackStore,
 ) : MusicRepository {
     private val nowPlayingLock = Any()
     private val nowPlayingRequestsInFlight = mutableSetOf<String>()
+    private val downloadedTracksRefreshMutex = Mutex()
+    private var downloadedTracksLastRefreshAtMillis = 0L
 
     suspend fun library(): CachedLibrary {
         val playlistPayload = apiClient.playlistsPayload()
@@ -288,6 +304,41 @@ class RemoteMusicRepository(
         return offlineTrackStore.download(apiClient.trackDownloadInfo(trackId))
     }
 
+    /**
+     * Checks locally downloaded tracks against the server and downloads a replacement
+     * only when its ETag or SHA-256 checksum changed.
+     */
+    suspend fun refreshChangedDownloads(): DownloadedTracksRefresh = withContext(Dispatchers.IO) {
+        downloadedTracksRefreshMutex.withLock {
+            val nowMillis = System.currentTimeMillis()
+            if (nowMillis - downloadedTracksLastRefreshAtMillis < DOWNLOAD_REFRESH_INTERVAL_MS) {
+                return@withLock DownloadedTracksRefresh(emptySet(), emptySet())
+            }
+            downloadedTracksLastRefreshAtMillis = nowMillis
+            val refreshedTrackIds = linkedSetOf<String>()
+            val removedTrackIds = linkedSetOf<String>()
+            offlineTrackStore.downloadedManifests()
+                .chunked(DOWNLOAD_UPDATES_BATCH_SIZE)
+                .forEach { localManifests ->
+                    try {
+                        val updates = apiClient.trackDownloadUpdates(localManifests)
+                        updates.tracks.forEach { downloadInfo ->
+                            offlineTrackStore.download(downloadInfo)
+                            refreshedTrackIds += downloadInfo.trackId
+                        }
+                        updates.removedTrackIds.forEach { trackId ->
+                            offlineTrackStore.removeDownload(trackId)
+                            removedTrackIds += trackId
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                    }
+                }
+            DownloadedTracksRefresh(refreshedTrackIds, removedTrackIds)
+        }
+    }
+
     override suspend fun promoteCachedTrack(trackId: String): OfflineTrackManifest? {
         return offlineTrackStore.promoteCachedTrack(trackId)
     }
@@ -476,5 +527,7 @@ class RemoteMusicRepository(
 
     private companion object {
         const val MUSIC_CACHE_LIMIT_BYTES = 4L * 1024L * 1024L * 1024L
+        const val DOWNLOAD_REFRESH_INTERVAL_MS = 60L * 60 * 1_000
+        const val DOWNLOAD_UPDATES_BATCH_SIZE = 500
     }
 }

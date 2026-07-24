@@ -467,8 +467,13 @@ internal fun downloadPlaylistAction(
             val downloadedTracksMissingArtwork = offlinePlaylist.trackIds
                 .mapNotNull(sourceTracksById::get)
                 .filter { track -> track.downloadState == DownloadState.Downloaded }
-                .distinctBy(Track::listArtworkKey)
-                .filter { track -> !hasCachedArtwork(track.listArtworkKey()) }
+                .distinctBy(Track::id)
+                .filter { track ->
+                    !hasCachedArtwork(track.listArtworkKey()) ||
+                        track.artistReferences().any { artist ->
+                            !hasCachedArtwork(artistArtworkKey(artist))
+                        }
+                }
             downloadedTracksMissingArtwork.forEach { track ->
                 currentCoroutineContext().ensureActive()
                 cacheDownloadedAssets(track)
@@ -654,8 +659,13 @@ internal fun downloadAlbumAction(
             val pendingTracks = sourceTracks.filter { it.downloadState != DownloadState.Downloaded }
             val downloadedTracksMissingArtwork = sourceTracks
                 .filter { track -> track.downloadState == DownloadState.Downloaded }
-                .distinctBy(Track::listArtworkKey)
-                .filter { track -> !hasCachedArtwork(track.listArtworkKey()) }
+                .distinctBy(Track::id)
+                .filter { track ->
+                    !hasCachedArtwork(track.listArtworkKey()) ||
+                        track.artistReferences().any { artist ->
+                            !hasCachedArtwork(artistArtworkKey(artist))
+                        }
+                }
             val offlineAlbum = album.copy(
                 savedByCurrentUser = wasSaved,
                 isOfflineEnabled = true,

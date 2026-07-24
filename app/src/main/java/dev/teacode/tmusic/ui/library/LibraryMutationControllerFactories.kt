@@ -34,8 +34,6 @@ internal fun createFavoriteTrackController(
     getTracks = { appState.tracks },
     setTracks = { appState.tracks = it },
     getSavedAlbums = { appState.savedAlbums },
-    getOfflineAlbumIds = { appState.offlineAlbumIds },
-    getAlbumTracksById = { appState.albumTracksById },
     musicRepository = musicRepository,
     authRepository = authRepository,
     libraryCacheStore = libraryCacheStore,
@@ -43,12 +41,6 @@ internal fun createFavoriteTrackController(
     mergePlaylistPickerMetadata = mergePlaylistPickerMetadata,
     updateKnownTrackLikedState = updateKnownTrackLikedState,
     updateTrackDownloadState = updateTrackDownloadState,
-    onTrackMovedToCache = { trackId, cachedUrl ->
-        val currentState = appState.playerState
-        if (cachedUrl != null && currentState.currentTrack?.id == trackId) {
-            appState.playerState = currentState.copy(streamUrl = cachedUrl)
-        }
-    },
     ensureTrackDownloaded = ensureTrackDownloaded,
     cacheDownloadedAssets = cacheDownloadedAssets,
     refreshStorageStats = refreshStorageStats,

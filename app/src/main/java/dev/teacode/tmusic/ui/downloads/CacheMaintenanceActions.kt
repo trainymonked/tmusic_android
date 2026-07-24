@@ -64,14 +64,11 @@ internal fun clearAppCacheAction(
             extraTracks = listOfNotNull(currentPlayerState.currentTrack),
         )
         val downloadedTracks = offlineIndex.downloadedTracks
-        val requiredDownloadedTrackIds = offlineIndex.requiredTrackIds
         val currentTrackId = currentPlayerState.currentTrack?.id
         val currentTrackIds = setOfNotNull(currentTrackId)
-        val retainedTrackIds = requiredDownloadedTrackIds + currentTrackIds
-        val retainedDownloadedTracks = downloadedTracks.filter { track -> track.id in retainedTrackIds }
-        val removedDownloadedTrackIds = downloadedTracks
-            .map { track -> track.id }
-            .toSet() - retainedTrackIds
+        // Clearing cache must never remove files that the user explicitly downloaded.
+        val retainedTrackIds = downloadedTracks.mapTo(linkedSetOf()) { track -> track.id } + currentTrackIds
+        val retainedDownloadedTracks = downloadedTracks
         val currentTrackDownloaded = currentTrackId != null && currentTrackId in retainedDownloadedTracks.map { it.id }
         if (!currentPlayerState.isPlaying && currentTrackDownloaded) {
             val localStreamUrl = currentTrackId?.let(musicRepository::localPlaybackUrl)
@@ -106,10 +103,6 @@ internal fun clearAppCacheAction(
         val retainedArtworkKeys = downloadedArtworkKeys(offlinePlaylists, retainedDownloadedTracks) + currentArtworkKeys
         val retainedArtworkCacheKeys = artworkCacheKeysFor(retainedArtworkKeys)
         artworkCacheStore.clearExcept(retainedArtworkCacheKeys)
-        musicRepository.removeDownloadsExcept(retainedTrackIds)
-        removedDownloadedTrackIds.forEach { trackId ->
-            updateTrackDownloadState(trackId, DownloadState.NotDownloaded)
-        }
         offlineLyricsStore.clearExcept(retainedTrackIds)
         setLyricsByTrackId(getLyricsByTrackId().filterKeys { trackId -> trackId in retainedTrackIds })
         if (currentTrackIds.isEmpty()) {

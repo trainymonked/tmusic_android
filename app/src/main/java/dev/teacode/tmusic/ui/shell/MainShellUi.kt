@@ -974,7 +974,10 @@ internal fun MainShell(
                 onAddCurrentTrackToPlaylist = onAddCurrentTrackToPlaylist,
                 onGoToTrackArtist = onGoToTrackArtist,
                 onGoToTrackAlbum = onGoToTrackAlbum,
-                onRefreshCurrentLyrics = onRefreshCurrentLyrics.takeIf { canPlayRemoteTracks },
+                // Keep the action discoverable while offline as well. The action itself
+                // explains why it cannot contact the server instead of making the
+                // control disappear when the connection state changes.
+                onRefreshCurrentLyrics = onRefreshCurrentLyrics,
                 onOpenQueue = onOpenQueue,
                 onCloseQueue = onCloseQueue,
                 onCloseFullPlayer = onCloseFullPlayer,

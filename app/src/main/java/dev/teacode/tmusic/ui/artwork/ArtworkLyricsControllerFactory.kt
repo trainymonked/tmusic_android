@@ -33,6 +33,7 @@ internal fun createArtworkLyricsController(
     markServerUnavailable = markServerUnavailable,
     getHomeArtists = { appState.homeArtists },
     getArtists = { appState.artists },
+    getArtistChoices = { appState.artistChoices },
     getSearchResults = { appState.searchResults },
     getSimilarArtistsByArtist = { appState.similarArtistsByArtist },
     getPlaylists = { appState.playlists },

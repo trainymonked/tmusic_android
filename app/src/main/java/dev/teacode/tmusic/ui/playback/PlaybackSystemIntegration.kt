@@ -6,7 +6,6 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -19,8 +18,6 @@ import dev.teacode.tmusic.R
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.playback.PlaybackForegroundService
 import dev.teacode.tmusic.playback.playbackAttributionContext
-
-private const val PLAYBACK_SYSTEM_LOG_TAG = "TMusicPlayback"
 
 @Composable
 internal fun PlaybackSystemIntegration(
@@ -143,11 +140,6 @@ private fun android.content.Context.updatePlaybackService(
         }
     } catch (error: IllegalStateException) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Log.e(
-                PLAYBACK_SYSTEM_LOG_TAG,
-                "Foreground playback service start was blocked by the system.",
-                error,
-            )
         } else {
             throw error
         }

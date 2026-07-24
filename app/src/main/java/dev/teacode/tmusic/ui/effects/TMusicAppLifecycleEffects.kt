@@ -2,9 +2,14 @@ package dev.teacode.tmusic.ui
 
 import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -18,12 +23,52 @@ internal fun TMusicAppLifecycleEffects(
     resumePendingOfflineDownloads: () -> Unit,
     pauseCollectionDownloadsForNetworkPolicy: () -> Unit,
     canUseServerRequests: () -> Boolean,
+    refreshSessionIfNeeded: suspend () -> Boolean,
+    refreshChangedDownloads: suspend () -> Unit,
     syncPendingPlayEvents: () -> Unit,
     restoreNowPlaying: () -> Unit,
     checkForAppUpdate: suspend (manual: Boolean) -> Unit,
     goBack: () -> Unit,
 ) {
     val activity = LocalContext.current as? Activity
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val refreshSessionAction = rememberUpdatedState(refreshSessionIfNeeded)
+    val refreshChangedDownloadsAction = rememberUpdatedState(refreshChangedDownloads)
+    fun refreshSessionWhenAvailable() {
+        scope.launch {
+            if (
+                appState.account != null &&
+                !appState.offlineOnly &&
+                canUseServerRequests()
+            ) {
+                if (refreshSessionAction.value()) {
+                    refreshChangedDownloadsAction.value()
+                }
+            }
+        }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                refreshSessionWhenAvailable()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+    LaunchedEffect(appState.account?.id, appState.offlineOnly, appState.syncMode) {
+        if (
+            appState.account != null &&
+            !appState.offlineOnly &&
+            canUseServerRequests()
+        ) {
+            if (refreshSessionAction.value()) {
+                refreshChangedDownloadsAction.value()
+            }
+        }
+    }
     TimedMessageClearEffect(appState.libraryNotice, timeoutMs = 2_500) { current ->
         if (appState.libraryNotice == current) {
             appState.libraryNotice = null

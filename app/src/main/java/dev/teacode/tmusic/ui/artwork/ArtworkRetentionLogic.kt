@@ -1,6 +1,7 @@
 package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.domain.DownloadState
+import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
 
@@ -11,10 +12,11 @@ internal fun downloadedArtworkKeys(
     val trackArtworkKeys = sourceTracks
         .filter { it.downloadState == DownloadState.Downloaded }
         .flatMap { track ->
-            listOfNotNull(
-                track.listArtworkKey(),
-                track.albumId?.let(::albumArtworkKey),
-            )
+            buildList {
+                add(track.listArtworkKey())
+                track.albumId?.let(::albumArtworkKey)?.let(::add)
+                track.artistReferences().mapTo(this, ::artistArtworkKey)
+            }
         }
         .toSet()
     val playlistArtworkKeys = playlists
@@ -26,6 +28,10 @@ internal fun downloadedArtworkKeys(
 
 internal fun artworkCacheKeysFor(artworkKeys: Set<String>): Set<String> {
     return artworkKeys.map { artworkKey -> artworkCacheKey(artworkKey, ArtworkImageSize.FullPlayer) }.toSet()
+}
+
+internal fun homeArtworkCacheKeys(homeArtists: List<LibraryArtist>): Set<String> {
+    return artworkCacheKeysFor(homeArtists.mapTo(mutableSetOf(), ::artistArtworkKey))
 }
 
 internal fun downloadedArtworkCacheKeys(

@@ -1,6 +1,6 @@
 ﻿package dev.teacode.tmusic.data
 
-import android.util.Log
+import android.util.Base64
 import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.domain.Account
 import dev.teacode.tmusic.domain.ArtistSimilarity
@@ -12,17 +12,21 @@ import dev.teacode.tmusic.domain.LibraryAlbum
 import dev.teacode.tmusic.domain.LibraryArtist
 import dev.teacode.tmusic.domain.LibraryArtistAlbums
 import dev.teacode.tmusic.domain.LibrarySearchResults
+import dev.teacode.tmusic.domain.OfflineTrackManifest
 import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.RecentAlbumChange
 import dev.teacode.tmusic.domain.ScrobbleState
 import dev.teacode.tmusic.domain.Track
 import dev.teacode.tmusic.domain.TrackDownloadInfo
+import dev.teacode.tmusic.domain.TrackDownloadUpdates
 import dev.teacode.tmusic.domain.TrackLyrics
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,8 +50,8 @@ data class LibraryArtistsPage(
 )
 
 private const val ARTWORK_SIZE_PX = 1200
-private const val API_LOG_TAG = "TMusicApi"
 private const val HTTP_UPGRADE_REQUIRED = 426
+private const val REFRESH_TOKEN_RENEWAL_LIFETIME_FRACTION = 10L
 
 class TMusicApiClient(
     initialBaseUrl: String,
@@ -60,6 +64,7 @@ class TMusicApiClient(
     private var serverResponseListener: (() -> Unit)? = null
     @Volatile
     private var serverFailureListener: ((Throwable) -> Unit)? = null
+    private val tokenRefreshMutex = Mutex()
 
     fun setBaseUrl(nextBaseUrl: String) {
         baseUrl = nextBaseUrl.trimEnd('/')
@@ -108,6 +113,21 @@ class TMusicApiClient(
             ?: root
 
         return user.toAccount()
+    }
+
+    /**
+     * Rotates the refresh token before it expires, so an account that is used
+     * regularly does not reach the point where a new sign-in is required.
+     */
+    suspend fun refreshSessionIfNeeded(): Boolean = withContext(Dispatchers.IO) {
+        tokenRefreshMutex.withLock {
+            val currentTokens = sessionStore.tokens() ?: return@withLock false
+            if (!currentTokens.refreshToken.shouldBeProactivelyRefreshed()) {
+                return@withLock false
+            }
+            refreshTokensLocked(currentTokens)
+            true
+        }
     }
 
     suspend fun appUpdateConfig(): AppUpdateInfo? {
@@ -261,15 +281,6 @@ class TMusicApiClient(
                 trackOffset = offset,
             )
             pages += page
-            val pagePlaylist = page.playlists.firstOrNull()
-            if (BuildConfig.DEBUG) {
-                Log.d(
-                    API_LOG_TAG,
-                    "favorites parsed offset=$offset rows=${pagePlaylist?.trackIds.orEmpty().size} " +
-                        "playlistTrackIds=${pagePlaylist?.playlistTrackIds.orEmpty().size} " +
-                        "trackModels=${page.tracks.size} total=${pagePlaylist?.trackCount}",
-                )
-            }
             val loadedTrackCount = pages.flatMap { payload -> payload.playlists.firstOrNull()?.trackIds.orEmpty() }.size
             val totalTrackCount = pages.asSequence()
                 .mapNotNull { payload -> payload.playlists.firstOrNull()?.trackCount?.takeIf { it > 0 } }
@@ -287,15 +298,6 @@ class TMusicApiClient(
         }
 
         val merged = pages.mergeSinglePlaylistPayload()
-        if (BuildConfig.DEBUG) {
-            val mergedPlaylist = merged.playlists.firstOrNull()
-            Log.d(
-                API_LOG_TAG,
-                "favorites merged rows=${mergedPlaylist?.trackIds.orEmpty().size} " +
-                    "playlistTrackIds=${mergedPlaylist?.playlistTrackIds.orEmpty().size} " +
-                    "trackModels=${merged.tracks.size} total=${mergedPlaylist?.trackCount}",
-            )
-        }
         return merged
     }
 
@@ -790,6 +792,60 @@ class TMusicApiClient(
         )
     }
 
+    suspend fun trackDownloadUpdates(localManifests: List<OfflineTrackManifest>): TrackDownloadUpdates {
+        require(localManifests.isNotEmpty()) { "At least one local download is required." }
+        require(localManifests.size <= DOWNLOAD_UPDATES_BATCH_SIZE) {
+            "At most $DOWNLOAD_UPDATES_BATCH_SIZE local downloads can be checked at once."
+        }
+        val body = JSONObject()
+            .put(
+                "tracks",
+                JSONArray().apply {
+                    localManifests.forEach { manifest ->
+                        put(
+                            JSONObject()
+                                .put("id", manifest.trackId)
+                                .put("checksumSha256", manifest.checksumSha256)
+                                .put("etag", manifest.etag),
+                        )
+                    }
+                },
+            )
+            .toString()
+        val responseBody = request(
+            method = "POST",
+            path = "/tracks/download-updates",
+            body = body,
+            authenticated = true,
+        )
+        val root = JSONObject(responseBody).payloadObject()
+        val tracks = root.optJSONArray("tracks")
+            ?: throw TMusicApiException(null, "The download updates response does not contain tracks.")
+        val removedTrackIds = root.optJSONArray("removedTrackIds")
+            ?: throw TMusicApiException(null, "The download updates response does not contain removedTrackIds.")
+        return TrackDownloadUpdates(
+            tracks = buildList {
+                for (index in 0 until tracks.length()) {
+                    val track = tracks.optJSONObject(index)
+                        ?: throw TMusicApiException(null, "Invalid track at index $index in download updates response.")
+                    add(
+                        track.toDownloadUpdateInfo(
+                            context = "Download updates response track at index $index",
+                            baseUrl = baseUrl,
+                        ),
+                    )
+                }
+            },
+            removedTrackIds = buildSet {
+                for (index in 0 until removedTrackIds.length()) {
+                    removedTrackIds.optString(index)
+                        .takeIf { id -> id.isNotBlank() }
+                        ?.let(::add)
+                }
+            },
+        )
+    }
+
     suspend fun artworkUrl(trackId: String): String {
         val body = request(
             method = "GET",
@@ -1088,11 +1144,6 @@ class TMusicApiClient(
         authenticated: Boolean,
         readTimeoutMs: Int = READ_TIMEOUT_MS,
     ): String = withContext(Dispatchers.IO) {
-        val requestLabel = "$method ${baseUrl + path}"
-        Log.d(
-            API_LOG_TAG,
-            "$requestLabel start auth=$authenticated bodyBytes=${body?.toByteArray(Charsets.UTF_8)?.size ?: 0}",
-        )
         val firstToken = if (authenticated) {
             sessionStore.tokens()?.accessToken
                 ?: throw TMusicApiException(null, "No access token is available.")
@@ -1109,8 +1160,7 @@ class TMusicApiClient(
         )
 
         if (authenticated && response.statusCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
-            Log.d(API_LOG_TAG, "$requestLabel -> HTTP 401, refreshing token")
-            refreshTokens()
+            refreshTokens(expectedAccessToken = firstToken)
             response = execute(
                 method = method,
                 path = path,
@@ -1121,10 +1171,6 @@ class TMusicApiClient(
         }
 
         if (response.statusCode !in 200..299) {
-            Log.e(
-                API_LOG_TAG,
-                "$requestLabel -> HTTP ${response.statusCode}: ${response.body.sanitizedForLog().take(400)}",
-            )
             throw TMusicApiException(
                 statusCode = response.statusCode,
                 message = response.errorMessage(),
@@ -1133,13 +1179,21 @@ class TMusicApiClient(
             )
         }
 
-        Log.d(API_LOG_TAG, "$requestLabel -> HTTP ${response.statusCode} (${response.body.length} chars)")
         response.body
     }
 
-    private fun refreshTokens() {
-        val currentTokens = sessionStore.tokens()
-            ?: throw TMusicApiException(null, "No refresh token is available.")
+    private suspend fun refreshTokens(expectedAccessToken: String?) {
+        tokenRefreshMutex.withLock {
+            val currentTokens = sessionStore.tokens()
+                ?: throw TMusicApiException(null, "No refresh token is available.")
+            if (expectedAccessToken != null && currentTokens.accessToken != expectedAccessToken) {
+                return@withLock
+            }
+            refreshTokensLocked(currentTokens)
+        }
+    }
+
+    private fun refreshTokensLocked(currentTokens: SessionTokens) {
         val body = JSONObject()
             .put("refreshToken", currentTokens.refreshToken)
             .toString()
@@ -1151,7 +1205,12 @@ class TMusicApiClient(
         )
 
         if (response.statusCode !in 200..299) {
-            sessionStore.clear()
+            // A temporary refresh-endpoint failure must not discard the local session.
+            // Only the server's explicit rejection proves that this token can no longer
+            // be used; network and 5xx failures can be retried later.
+            if (response.statusCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                sessionStore.clear()
+            }
             throw TMusicApiException(
                 statusCode = response.statusCode,
                 message = response.errorMessage(),
@@ -1209,16 +1268,9 @@ class TMusicApiClient(
                 body = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty(),
             )
             runCatching { serverResponseListener?.invoke() }
-                .onFailure { error ->
-                    Log.w(API_LOG_TAG, "Server response listener failed.", error)
-                }
             response
         } catch (error: Exception) {
-            Log.e(API_LOG_TAG, "$method $url failed: ${error.javaClass.simpleName}: ${error.message}", error)
             runCatching { serverFailureListener?.invoke(error) }
-                .onFailure { listenerError ->
-                    Log.w(API_LOG_TAG, "Server failure listener failed.", listenerError)
-                }
             throw error
         } finally {
             connection?.disconnect()
@@ -1239,8 +1291,8 @@ class TMusicApiClient(
         const val TRACK_LIST_PAGE_LIMIT = 500
         const val TRACK_CATALOG_PAGE_LIMIT = 500
         const val TRACK_SEARCH_PAGE_LIMIT = 100
+        const val DOWNLOAD_UPDATES_BATCH_SIZE = 500
         const val LIBRARY_ARTIST_ALBUMS_MAX_REQUESTS = 200
-
         val ACCENT_COLORS = longArrayOf(
             0xFF111111,
             0xFF2A2A2A,
@@ -1255,6 +1307,29 @@ class TMusicApiClient(
             return ACCENT_COLORS[index]
         }
     }
+}
+
+private fun String.shouldBeProactivelyRefreshed(
+    nowMillis: Long = System.currentTimeMillis(),
+): Boolean {
+    val payload = split('.').getOrNull(1) ?: return false
+    val paddedPayload = payload.padEnd((payload.length + 3) / 4 * 4, '=')
+    val tokenPayload = runCatching {
+        val json = String(
+            Base64.decode(paddedPayload, Base64.URL_SAFE or Base64.NO_WRAP),
+            Charsets.UTF_8,
+        )
+        JSONObject(json)
+    }.getOrNull() ?: return false
+    val expiresAtMillis = tokenPayload.optLong("exp", 0L) * 1_000L
+    val issuedAtMillis = tokenPayload.optLong("iat", 0L) * 1_000L
+    val renewalWindowMillis = if (issuedAtMillis in 1 until expiresAtMillis) {
+        (expiresAtMillis - issuedAtMillis) / REFRESH_TOKEN_RENEWAL_LIFETIME_FRACTION
+    } else {
+        0L
+    }
+    return expiresAtMillis > nowMillis &&
+        expiresAtMillis - nowMillis <= renewalWindowMillis
 }
 
 private data class ApiResponse(
@@ -1302,11 +1377,15 @@ private fun JSONObject.payloadObject(): JSONObject {
     return optJSONObject("data") ?: this
 }
 
-private fun String.sanitizedForLog(): String {
-    return replace(Regex("(?i)\"(accessToken|refreshToken|idToken|token)\"\\s*:\\s*\"[^\"]*\"")) { match ->
-        val key = match.groupValues[1]
-        "\"$key\":\"***\""
-    }
+private fun JSONObject.toDownloadUpdateInfo(context: String, baseUrl: String): TrackDownloadInfo {
+    return TrackDownloadInfo(
+        trackId = expectedStringOrLog("id", context)
+            ?: throw TMusicApiException(null, "$context does not contain id."),
+        url = expectedStringOrLog("url", context)?.toAbsoluteUrl(baseUrl)
+            ?: throw TMusicApiException(null, "$context does not contain url."),
+        etag = optionalString("etag"),
+        checksumSha256 = optionalString("checksumSha256"),
+    )
 }
 
 private fun JSONObject.requireString(name: String): String {
@@ -1318,33 +1397,15 @@ private fun JSONObject.requireString(name: String): String {
 }
 
 private fun JSONObject.expectedStringOrLog(name: String, context: String): String? {
-    val value = optionalString(name)
-    if (value == null) {
-        Log.e(
-            API_LOG_TAG,
-            "$context is missing expected JSON field '$name': " +
-                toString().sanitizedForLog().take(800),
-        )
-    }
-    return value
+    return optionalString(name)
 }
 
 private fun JSONObject.expectedBooleanOrLog(name: String, context: String): Boolean? {
     if (!has(name) || isNull(name)) {
-        Log.e(
-            API_LOG_TAG,
-            "$context is missing expected JSON field '$name': " +
-                toString().sanitizedForLog().take(800),
-        )
         return null
     }
     val value = opt(name)
     if (value !is Boolean) {
-        Log.e(
-            API_LOG_TAG,
-            "$context has non-boolean JSON field '$name': " +
-                toString().sanitizedForLog().take(800),
-        )
         return null
     }
     return value
@@ -1683,11 +1744,7 @@ private fun JSONObject.parseTrackIds(): List<String> {
                 val nestedTrack = item.optJSONObject("track")
                 val trackId = nestedTrack?.optionalString("id")
                     ?: item.optionalString("trackId")
-                if (trackId == null) {
-                    Log.e(API_LOG_TAG, "Playlist track row at index $index is missing expected JSON field 'track.id': $item")
-                } else {
-                    ids += trackId
-                }
+                trackId?.let(ids::add)
             }
             else -> item.toString().takeIf { it.isNotBlank() }?.let(ids::add)
         }
@@ -1703,11 +1760,7 @@ private fun JSONObject.parsePlaylistTrackIds(): List<String> {
     for (index in 0 until array.length()) {
         val item = array.optJSONObject(index) ?: continue
         val playlistTrackId = item.optionalString("playlistTrackId")
-        if (playlistTrackId == null) {
-            Log.e(API_LOG_TAG, "Playlist track row at index $index is missing expected JSON field 'playlistTrackId': $item")
-        } else {
-            ids += playlistTrackId
-        }
+        playlistTrackId?.let(ids::add)
     }
 
     return ids
@@ -1732,12 +1785,7 @@ private fun JSONObject.parsePlaylistTrackIdsByTrackId(): Map<String, String> {
             ?: item.optionalString("trackId")
             ?: continue
         val playlistTrackId = item.optionalString("playlistTrackId")
-        if (playlistTrackId == null) {
-            Log.e(API_LOG_TAG, "Playlist track row for track $trackId is missing expected JSON field 'playlistTrackId': $item")
-            continue
-        }
-
-        idsByTrackId.putIfAbsent(trackId, playlistTrackId)
+        playlistTrackId?.let { idsByTrackId.putIfAbsent(trackId, it) }
     }
 
     return idsByTrackId
@@ -2268,14 +2316,7 @@ private fun Any.toLibraryAlbumValue(): LibraryAlbum? {
 private fun Any.toSavedLibraryAlbumValue(): LibraryAlbum? {
     val value = this as? JSONObject ?: return null
     val albumJson = value.optJSONObject("album")
-    if (albumJson == null) {
-        Log.e(
-            API_LOG_TAG,
-            "UserAlbum payload is missing expected JSON field 'album': " +
-                value.toString().sanitizedForLog().take(800),
-        )
-        return null
-    }
+        ?: return null
 
     val parsedAlbum = albumJson.toLibraryAlbum() ?: return null
     return parsedAlbum.copy(

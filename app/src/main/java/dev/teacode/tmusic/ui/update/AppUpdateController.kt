@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -73,11 +72,6 @@ internal class AppUpdateController(
             clearAvailableUpdate()
             return
         }
-        Log.d(
-            APP_UPDATE_LOG_TAG,
-            "server update version=${enforcedUpdate.version} latestCode=${enforcedUpdate.latestVersionCode} " +
-                "minCode=${enforcedUpdate.minSupportedVersionCode} force=${enforcedUpdate.forceUpdate}",
-        )
         availableUpdate = enforcedUpdate
         userPreferencesStore.setCachedAppUpdate(enforcedUpdate)
         if (prompt || enforcedUpdate.forceUpdate) {
@@ -117,10 +111,6 @@ internal class AppUpdateController(
         debugStatus: String,
     ) {
         if (!canCheck || checkInProgress) {
-            Log.d(
-                APP_UPDATE_LOG_TAG,
-                "skip check manual=$manual canCheck=$canCheck inProgress=$checkInProgress $debugStatus",
-            )
             if (manual && !canCheck) {
                 onError("Connect to the internet before checking updates.")
             } else if (manual && checkInProgress) {
@@ -131,7 +121,6 @@ internal class AppUpdateController(
         val now = System.currentTimeMillis()
         userPreferencesStore.setLastUpdateCheckEpochMs(now)
         checkInProgress = true
-        Log.d(APP_UPDATE_LOG_TAG, "run check manual=$manual currentVersion=$currentVersion")
         var checkError: Throwable? = null
         val update = try {
             appUpdateChecker.latestUpdate(currentVersion)
@@ -139,14 +128,12 @@ internal class AppUpdateController(
             checkInProgress = false
             throw error
         } catch (error: Throwable) {
-            Log.w(APP_UPDATE_LOG_TAG, "check failed manual=$manual", error)
             checkError = error
             null
         } finally {
             checkInProgress = false
         }
         if (update != null) {
-            Log.d(APP_UPDATE_LOG_TAG, "new update available version=${update.version} url=${update.downloadUrl}")
             applyServerUpdate(
                 update = update,
                 prompt = manual || userPreferencesStore.lastPromptedUpdateVersion() != update.version,
@@ -163,7 +150,6 @@ internal class AppUpdateController(
                 showDetails(availableUpdate)
             }
         } else {
-            Log.d(APP_UPDATE_LOG_TAG, "no newer update available")
             clearAvailableUpdate()
             if (manual) {
                 onNotice("No updates found.")
@@ -274,17 +260,6 @@ internal class AppUpdateController(
         }
         runCatching {
             context.getSystemService(DownloadManager::class.java).remove(pendingUpdate.downloadId)
-        }.onSuccess {
-            Log.d(
-                APP_UPDATE_LOG_TAG,
-                "removed installed update apk version=${pendingUpdate.version} downloadId=${pendingUpdate.downloadId}",
-            )
-        }.onFailure { error ->
-            Log.w(
-                APP_UPDATE_LOG_TAG,
-                "failed to remove installed update apk downloadId=${pendingUpdate.downloadId}",
-                error,
-            )
         }
         userPreferencesStore.clearPendingDownloadedAppUpdate()
     }
@@ -296,9 +271,5 @@ internal class AppUpdateController(
             }
         }
         return !isAppVersionNewer(version, currentVersion)
-    }
-
-    private companion object {
-        const val APP_UPDATE_LOG_TAG = "TMusicUpdate"
     }
 }
