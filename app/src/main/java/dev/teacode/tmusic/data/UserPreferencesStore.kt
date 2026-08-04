@@ -90,6 +90,16 @@ class UserPreferencesStore(context: Context) {
             .apply()
     }
 
+    fun animatedPlayerBackground(): Boolean {
+        return preferences.getBoolean(KEY_ANIMATED_PLAYER_BACKGROUND, false)
+    }
+
+    fun setAnimatedPlayerBackground(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_ANIMATED_PLAYER_BACKGROUND, enabled)
+            .apply()
+    }
+
     fun themeMode(): String {
         return preferences.getString(KEY_THEME_MODE, DEFAULT_THEME_MODE) ?: DEFAULT_THEME_MODE
     }
@@ -373,6 +383,7 @@ class UserPreferencesStore(context: Context) {
         const val KEY_PLAYBACK_REPEAT_MODE = "playback_repeat_mode"
         const val KEY_SHOW_ONLY_ACTIVE_SYNCED_LYRICS = "show_only_active_synced_lyrics"
         const val KEY_CENTER_SYNCED_LYRICS = "center_synced_lyrics"
+        const val KEY_ANIMATED_PLAYER_BACKGROUND = "animated_player_background"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_DOWNLOAD_USING_CELLULAR = "download_using_cellular"
         const val KEY_CROSSFADE_SECONDS = "crossfade_seconds"

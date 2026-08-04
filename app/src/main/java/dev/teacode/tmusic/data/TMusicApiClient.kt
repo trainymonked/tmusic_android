@@ -3,6 +3,7 @@
 import android.util.Base64
 import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.AccountRole
 import dev.teacode.tmusic.domain.ArtistSimilarity
 import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.DownloadState
@@ -47,6 +48,11 @@ data class PlaylistPayload(
 data class LibraryArtistsPage(
     val artists: List<LibraryArtist>,
     val totalCount: Int?,
+)
+
+data class WebLoginCode(
+    val code: String,
+    val expiresAt: String,
 )
 
 private const val ARTWORK_SIZE_PX = 1200
@@ -113,6 +119,19 @@ class TMusicApiClient(
             ?: root
 
         return user.toAccount()
+    }
+
+    suspend fun createWebLoginCode(): WebLoginCode {
+        val responseBody = request(
+            method = "POST",
+            path = "/auth/web-login-codes",
+            authenticated = true,
+        )
+        val root = JSONObject(responseBody)
+        return WebLoginCode(
+            code = root.requireString("code"),
+            expiresAt = root.requireString("expiresAt"),
+        )
     }
 
     /**
@@ -1658,6 +1677,11 @@ private fun JSONObject.toAccount(): Account {
         avatarUrl = optionalString("avatarUrl"),
         lastFmConnection = accountLastFmConnection(),
         canPlayMedia = optionalBoolean("canPlayMedia") ?: true,
+        role = when (val role = requireString("role")) {
+            "USER" -> AccountRole.USER
+            "ADMIN" -> AccountRole.ADMIN
+            else -> throw TMusicApiException(null, "The response contains an unknown account role: $role.")
+        },
     )
 }
 

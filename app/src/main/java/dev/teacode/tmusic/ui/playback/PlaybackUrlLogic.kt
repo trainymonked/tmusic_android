@@ -9,10 +9,14 @@ import java.net.URI
 
 private const val PLAYBACK_MEDIA_CACHE_KEY_PREFIX = "tmusic-track:"
 
+internal fun playbackMediaCacheKey(trackId: String): String {
+    return "$PLAYBACK_MEDIA_CACHE_KEY_PREFIX$trackId"
+}
+
 internal fun playbackMediaCacheKey(trackId: String, playbackUrl: String): String? {
     val isRemoteStream = playbackUrl.startsWith("https://", ignoreCase = true) ||
         playbackUrl.startsWith("http://", ignoreCase = true)
-    return if (isRemoteStream) "$PLAYBACK_MEDIA_CACHE_KEY_PREFIX$trackId" else null
+    return if (isRemoteStream) playbackMediaCacheKey(trackId) else null
 }
 
 internal fun SimpleCache.resolvePlaybackMediaCacheKey(

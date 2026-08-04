@@ -3,6 +3,7 @@ package dev.teacode.tmusic.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -110,6 +111,7 @@ private fun FullPlayerArtworkSectionContent(
                 .clip(RoundedCornerShape(8.dp)),
         )
         if (showLyrics) {
+            Spacer(modifier = Modifier.height(8.dp))
             LyricsBlock(
                 trackId = track.id,
                 lyrics = lyrics,
@@ -148,6 +150,7 @@ private fun FullPlayerArtworkPreviewContent(
                 .clip(RoundedCornerShape(8.dp)),
         )
         if (showLyrics) {
+            Spacer(modifier = Modifier.height(8.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

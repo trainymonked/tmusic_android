@@ -28,6 +28,7 @@ fun TMusicApp(
     pendingLibraryMutationStore: PendingLibraryMutationStore,
     pendingPlayEventStore: PendingPlayEventStore,
     lastFmAuthTokenStore: LastFmAuthTokenStore,
+    openFullPlayerRequestSerial: Int,
 ) {
     TMusicAppControllerContent(
         authRepository = authRepository,
@@ -41,5 +42,6 @@ fun TMusicApp(
         pendingLibraryMutationStore = pendingLibraryMutationStore,
         pendingPlayEventStore = pendingPlayEventStore,
         lastFmAuthTokenStore = lastFmAuthTokenStore,
+        openFullPlayerRequestSerial = openFullPlayerRequestSerial,
     )
 }

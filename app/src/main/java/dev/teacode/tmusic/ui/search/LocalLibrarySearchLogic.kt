@@ -41,15 +41,6 @@ internal fun LibraryAlbum.matchesArtistName(name: String): Boolean {
 }
 
 internal fun Track.displayArtistNames(): String {
-    val names = (artists.map { it.name } + artist.artistNameParts())
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinctBy { it.lowercase() }
+    val names = resolvedArtistDisplayNames(artists, artist)
     return names.joinToString(" \u2022 ").ifBlank { artist }
-}
-
-private fun String.artistNameParts(): List<String> {
-    return split(';')
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
 }

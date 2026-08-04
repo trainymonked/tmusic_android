@@ -83,6 +83,7 @@ internal class TMusicAppMutableState(
     var shuffleEnabled by mutableStateOf(userPreferencesStore.shuffleEnabled())
     var showOnlyActiveSyncedLyrics by mutableStateOf(true)
     var centerSyncedLyrics by mutableStateOf(false)
+    var animatedPlayerBackground by mutableStateOf(userPreferencesStore.animatedPlayerBackground())
     var downloadUsingCellular by mutableStateOf(userPreferencesStore.downloadUsingCellular())
     var showEnableCellularDownloadDialog by mutableStateOf(false)
     var crossfadeSeconds by mutableStateOf(userPreferencesStore.crossfadeSeconds())

@@ -1,7 +1,29 @@
 package dev.teacode.tmusic.ui
 
 import dev.teacode.tmusic.domain.DownloadState
+import dev.teacode.tmusic.domain.Playlist
 import dev.teacode.tmusic.domain.Track
+
+internal fun List<Track>.withFavoritePlaylistState(playlists: List<Playlist>): List<Track> {
+    if (isEmpty()) {
+        return this
+    }
+    val favoriteTrackIds = playlists
+        .firstOrNull { playlist -> playlist.isFavoritesPlaylist() }
+        ?.trackIds
+        ?.toSet()
+        .orEmpty()
+    if (favoriteTrackIds.isEmpty()) {
+        return this
+    }
+    return map { track ->
+        if (track.id in favoriteTrackIds && track.isLiked != true) {
+            track.copy(isLiked = true)
+        } else {
+            track
+        }
+    }
+}
 
 internal fun List<Track>.withKnownTrackMetadata(existingTracks: List<Track>): List<Track> {
     if (isEmpty() || existingTracks.isEmpty()) {

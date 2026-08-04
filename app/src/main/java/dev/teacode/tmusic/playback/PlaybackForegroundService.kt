@@ -18,6 +18,11 @@ class PlaybackForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) {
+            stopForegroundCompat()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_STOP) {
             stopForegroundCompat()
             stopSelf()
@@ -30,7 +35,7 @@ class PlaybackForegroundService : Service() {
                         MediaController(playbackAttributionContext(), token).transportControls.skipToPrevious()
                     }
                 }
-                return START_STICKY
+                return START_NOT_STICKY
             }
             ACTION_TOGGLE_PLAYBACK -> {
                 intent.mediaSessionToken()?.let { token ->
@@ -41,7 +46,7 @@ class PlaybackForegroundService : Service() {
                         controls.play()
                     }
                 }
-                return START_STICKY
+                return START_NOT_STICKY
             }
             ACTION_NEXT -> {
                 if (intent.getBooleanExtra(EXTRA_CAN_SKIP, false)) {
@@ -49,7 +54,7 @@ class PlaybackForegroundService : Service() {
                         MediaController(playbackAttributionContext(), token).transportControls.skipToNext()
                     }
                 }
-                return START_STICKY
+                return START_NOT_STICKY
             }
             ACTION_TOGGLE_FAVORITE -> {
                 intent.mediaSessionToken()?.let { token ->
@@ -58,29 +63,39 @@ class PlaybackForegroundService : Service() {
                         null,
                     )
                 }
-                return START_STICKY
+                return START_NOT_STICKY
             }
         }
 
+        val title = intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() }
+        val artist = intent.getStringExtra(EXTRA_ARTIST).orEmpty()
+        val sessionToken = intent.mediaSessionToken()
+        if (intent.action != ACTION_UPDATE || title == null || sessionToken == null) {
+            stopForegroundCompat()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         createNotificationChannel()
-        val notification = buildNotification(intent)
+        val notification = buildNotification(
+            intent = intent,
+            title = title,
+            artist = artist,
+            sessionToken = sessionToken,
+        )
         startForeground(NOTIFICATION_ID, notification)
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
-    private fun buildNotification(intent: Intent?): Notification {
-        val title = intent?.getStringExtra(EXTRA_TITLE).takeUnless { it.isNullOrBlank() } ?: "T-Music"
-        val artist = intent?.getStringExtra(EXTRA_ARTIST).takeUnless { it.isNullOrBlank() } ?: "Music playback"
-        val isPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, false) ?: false
-        val isFavorite = intent?.getBooleanExtra(EXTRA_IS_FAVORITE, false) ?: false
-        val canSkip = intent?.getBooleanExtra(EXTRA_CAN_SKIP, false) ?: false
-        val sessionToken = intent?.mediaSessionToken()
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+    private fun buildNotification(
+        intent: Intent,
+        title: String,
+        artist: String,
+        sessionToken: MediaSession.Token,
+    ): Notification {
+        val isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false)
+        val isFavorite = intent.getBooleanExtra(EXTRA_IS_FAVORITE, false)
+        val canSkip = intent.getBooleanExtra(EXTRA_CAN_SKIP, false)
+        val contentIntent = MainActivity.openFullPlayerPendingIntent(this)
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -97,65 +112,62 @@ class PlaybackForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
 
-        if (sessionToken != null) {
-            val previousPendingIntent = playbackActionIntent(
-                action = ACTION_PREVIOUS,
-                requestCode = REQUEST_PREVIOUS,
-                sessionToken = sessionToken,
-                isPlaying = isPlaying,
-                canSkip = canSkip,
-            )
-            val togglePlaybackPendingIntent = playbackActionIntent(
-                action = ACTION_TOGGLE_PLAYBACK,
-                requestCode = REQUEST_TOGGLE_PLAYBACK,
-                sessionToken = sessionToken,
-                isPlaying = isPlaying,
-                canSkip = canSkip,
-            )
-            val nextPendingIntent = playbackActionIntent(
-                action = ACTION_NEXT,
-                requestCode = REQUEST_NEXT,
-                sessionToken = sessionToken,
-                isPlaying = isPlaying,
-                canSkip = canSkip,
-            )
-            val favoritePendingIntent = playbackActionIntent(
-                action = ACTION_TOGGLE_FAVORITE,
-                requestCode = REQUEST_TOGGLE_FAVORITE,
-                sessionToken = sessionToken,
-                isPlaying = isPlaying,
-                canSkip = canSkip,
-            )
-            builder.addAction(
-                R.drawable.ic_skip_previous,
-                "Previous",
-                previousPendingIntent,
-            )
-            builder.addAction(
-                if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow,
-                if (isPlaying) "Pause" else "Play",
-                togglePlaybackPendingIntent,
-            )
-            builder.addAction(
-                R.drawable.ic_skip_next,
-                "Next",
-                nextPendingIntent,
-            )
-            builder.addAction(
-                if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
-                if (isFavorite) "Remove from Favorites" else "Add to Favorites",
-                favoritePendingIntent,
-            )
-        }
+        val previousPendingIntent = playbackActionIntent(
+            action = ACTION_PREVIOUS,
+            requestCode = REQUEST_PREVIOUS,
+            sessionToken = sessionToken,
+            isPlaying = isPlaying,
+            canSkip = canSkip,
+        )
+        val togglePlaybackPendingIntent = playbackActionIntent(
+            action = ACTION_TOGGLE_PLAYBACK,
+            requestCode = REQUEST_TOGGLE_PLAYBACK,
+            sessionToken = sessionToken,
+            isPlaying = isPlaying,
+            canSkip = canSkip,
+        )
+        val nextPendingIntent = playbackActionIntent(
+            action = ACTION_NEXT,
+            requestCode = REQUEST_NEXT,
+            sessionToken = sessionToken,
+            isPlaying = isPlaying,
+            canSkip = canSkip,
+        )
+        val favoritePendingIntent = playbackActionIntent(
+            action = ACTION_TOGGLE_FAVORITE,
+            requestCode = REQUEST_TOGGLE_FAVORITE,
+            sessionToken = sessionToken,
+            isPlaying = isPlaying,
+            canSkip = canSkip,
+        )
+        builder.addAction(
+            R.drawable.ic_skip_previous,
+            "Previous",
+            previousPendingIntent,
+        )
+        builder.addAction(
+            if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow,
+            if (isPlaying) "Pause" else "Play",
+            togglePlaybackPendingIntent,
+        )
+        builder.addAction(
+            R.drawable.ic_skip_next,
+            "Next",
+            nextPendingIntent,
+        )
+        builder.addAction(
+            if (isFavorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border,
+            if (isFavorite) "Remove from Favorites" else "Add to Favorites",
+            favoritePendingIntent,
+        )
 
-        if (sessionToken != null) {
-            builder.setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2),
-            )
-        }
+        builder.setStyle(
+            Notification.MediaStyle()
+                .setMediaSession(sessionToken)
+                .setShowActionsInCompactView(0, 1, 2),
+        )
 
         return builder.build()
     }

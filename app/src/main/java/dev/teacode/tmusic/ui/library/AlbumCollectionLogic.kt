@@ -16,6 +16,7 @@ internal fun List<LibraryAlbum>.updateAlbum(updatedAlbum: LibraryAlbum): List<Li
                 artistIds = updatedAlbum.artistIds.ifEmpty { album.artistIds },
                 artists = updatedAlbum.artists.ifEmpty { album.artists },
                 totalDurationSeconds = updatedAlbum.totalDurationSeconds ?: album.totalDurationSeconds,
+                userAlbumCreatedAt = updatedAlbum.userAlbumCreatedAt ?: album.userAlbumCreatedAt,
             )
         } else {
             album

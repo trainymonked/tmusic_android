@@ -12,17 +12,18 @@ import android.media.MediaRouter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 internal data class AudioOutputDevice(
     val name: String,
@@ -30,41 +31,41 @@ internal data class AudioOutputDevice(
     val isBluetooth: Boolean = false,
 )
 
+internal val LocalBluetoothPermissionRevision = staticCompositionLocalOf { 0 }
+
 @Composable
 internal fun rememberAudioOutputDevice(): AudioOutputDevice {
     val context = LocalContext.current.applicationContext
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val bluetoothPermissionRevision = LocalBluetoothPermissionRevision.current
     val audioManager = remember(context) {
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
     val mediaRouter = remember(context) {
         context.getSystemService(Context.MEDIA_ROUTER_SERVICE) as MediaRouter
     }
-    var bluetoothNameAccessGranted by remember(context) {
-        mutableStateOf(context.hasBluetoothNameAccess())
-    }
-    var outputDevice by remember(audioManager, mediaRouter, bluetoothNameAccessGranted) {
+    var outputDevice by remember(
+        audioManager,
+        mediaRouter,
+        bluetoothPermissionRevision,
+    ) {
         mutableStateOf(resolveAudioOutputDevice(context, audioManager, mediaRouter))
     }
-    val bluetoothNamePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        bluetoothNameAccessGranted = granted
-        outputDevice = resolveAudioOutputDevice(context, audioManager, mediaRouter)
-    }
 
-    LaunchedEffect(outputDevice.isBluetooth, bluetoothNameAccessGranted) {
-        if (
-            outputDevice.isBluetooth &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            !bluetoothNameAccessGranted
-        ) {
-            bluetoothNamePermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-    }
-
-    DisposableEffect(context, audioManager, mediaRouter, bluetoothNameAccessGranted) {
+    DisposableEffect(
+        context,
+        lifecycleOwner,
+        audioManager,
+        mediaRouter,
+        bluetoothPermissionRevision,
+    ) {
         val updateOutput = {
             outputDevice = resolveAudioOutputDevice(context, audioManager, mediaRouter)
+        }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                updateOutput()
+            }
         }
         val deviceCallback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
@@ -102,11 +103,13 @@ internal fun rememberAudioOutputDevice(): AudioOutputDevice {
             }
         }
 
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
         audioManager.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
         audioManager.registerAudioPlaybackCallback(playbackCallback, Handler(Looper.getMainLooper()))
         mediaRouter.addCallback(MediaRouter.ROUTE_TYPE_LIVE_AUDIO, routeCallback)
         updateOutput()
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             runCatching { audioManager.unregisterAudioDeviceCallback(deviceCallback) }
             runCatching { audioManager.unregisterAudioPlaybackCallback(playbackCallback) }
             runCatching { mediaRouter.removeCallback(routeCallback) }
@@ -194,8 +197,8 @@ private fun AudioDeviceInfo.toAudioOutputDevice(
         "Headphones"
     } else if (isBluetoothAudioOutput()) {
         context.bluetoothDeviceName(address)
-            ?: productDeviceName?.takeUnless(::isGenericBluetoothDeviceName)
             ?: bluetoothRouteName
+            ?: productDeviceName?.takeUnless(::isGenericBluetoothDeviceName)
             ?: "Bluetooth device"
     } else {
         productDeviceName ?: "Headphones"

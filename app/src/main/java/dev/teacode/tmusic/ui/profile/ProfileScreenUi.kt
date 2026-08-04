@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,8 +36,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.AccountRole
 import dev.teacode.tmusic.domain.LastFmConnection
+import dev.teacode.tmusic.data.WebLoginCode
 import dev.teacode.tmusic.ui.theme.LocalAppThemeController
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun ProfileScreen(
@@ -53,6 +58,7 @@ internal fun ProfileScreen(
     scrobblingPaused: Boolean,
     showOnlyActiveSyncedLyrics: Boolean,
     centerSyncedLyrics: Boolean,
+    animatedPlayerBackground: Boolean,
     crossfadeSeconds: Int,
     equalizerAvailable: Boolean,
     offlineOnly: Boolean,
@@ -67,6 +73,7 @@ internal fun ProfileScreen(
     onScrobblingPausedChange: (Boolean) -> Unit,
     onShowOnlyActiveSyncedLyricsChange: (Boolean) -> Unit,
     onCenterSyncedLyricsChange: (Boolean) -> Unit,
+    onAnimatedPlayerBackgroundChange: (Boolean) -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit,
     onDownloadUsingCellularChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
@@ -74,13 +81,39 @@ internal fun ProfileScreen(
     onCompleteLastFmSession: () -> Unit,
     onDisconnectLastFm: () -> Unit,
     onSyncLastFmUpdates: () -> Unit,
+    onCreateWebLoginCode: suspend () -> WebLoginCode,
     onClearDownloads: () -> Unit,
     onClearCache: () -> Unit,
     onCheckUpdates: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val themeController = LocalAppThemeController.current
+    val scope = rememberCoroutineScope()
     var pendingConfirmation by remember { mutableStateOf<ProfileConfirmation?>(null) }
+    var webLoginCode by remember(account.id) { mutableStateOf<WebLoginCode?>(null) }
+    var webLoginCodeCreating by remember(account.id) { mutableStateOf(false) }
+    var webLoginCodeError by remember(account.id) { mutableStateOf<String?>(null) }
+
+    fun requestWebLoginCode() {
+        if (account.role != AccountRole.ADMIN || webLoginCodeCreating || !canUseNetwork) {
+            return
+        }
+        webLoginCodeCreating = true
+        webLoginCodeError = null
+        webLoginCode = null
+        scope.launch {
+            try {
+                webLoginCode = onCreateWebLoginCode()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                webLoginCodeError = error.userMessage()
+            } finally {
+                webLoginCodeCreating = false
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
@@ -122,7 +155,9 @@ internal fun ProfileScreen(
         item {
             ProfileAppearanceSection(
                 themeMode = themeController.themeMode,
+                animatedPlayerBackground = animatedPlayerBackground,
                 onThemeModeChange = themeController.onThemeModeChange,
+                onAnimatedPlayerBackgroundChange = onAnimatedPlayerBackgroundChange,
             )
         }
         item {
@@ -147,6 +182,16 @@ internal fun ProfileScreen(
                 onClearDownloads = { pendingConfirmation = ProfileConfirmation.ClearDownloads },
                 onClearCache = onClearCache,
             )
+        }
+        if (account.role == AccountRole.ADMIN) {
+            item {
+                ProfileWebPlayerSection(
+                    canUseNetwork = canUseNetwork,
+                    creatingCode = webLoginCodeCreating,
+                    errorMessage = webLoginCodeError,
+                    onCreateCode = ::requestWebLoginCode,
+                )
+            }
         }
         item {
             ProfileConnectionSection(
@@ -190,6 +235,12 @@ internal fun ProfileScreen(
                     Text("Cancel")
                 }
             },
+        )
+    }
+    webLoginCode?.let { loginCode ->
+        WebLoginCodeDialog(
+            loginCode = loginCode,
+            onDismiss = { webLoginCode = null },
         )
     }
 }

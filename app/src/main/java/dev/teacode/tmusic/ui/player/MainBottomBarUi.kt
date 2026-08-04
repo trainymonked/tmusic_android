@@ -25,6 +25,7 @@ internal fun MainBottomBar(
     selectedTab: AppTab,
     playerState: PlayerState,
     artworkBitmap: ImageBitmap?,
+    animatedPlayerBackground: Boolean,
     queueGeneration: Long,
     canSkipTracks: Boolean,
     previousTrack: Track?,
@@ -57,6 +58,7 @@ internal fun MainBottomBar(
             MiniPlayer(
                 playerState = playerState,
                 artworkBitmap = artworkBitmap,
+                animatedPlayerBackground = animatedPlayerBackground,
                 queueGeneration = queueGeneration,
                 canSkip = canSkipTracks,
                 previousTrack = previousTrack,

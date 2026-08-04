@@ -1,6 +1,11 @@
 package dev.teacode.tmusic.data
 
 import android.content.Context
+import android.net.Uri
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.SimpleCache
 import dev.teacode.tmusic.BuildConfig
 import dev.teacode.tmusic.domain.OfflineTrackManifest
 import dev.teacode.tmusic.domain.TrackDownloadInfo
@@ -8,6 +13,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -114,6 +120,101 @@ class OfflineTrackStore(context: Context) {
             trackId = trackId,
             etag = null,
             checksumSha256 = null,
+            localPath = destination.absolutePath,
+        )
+        save(manifest)
+        manifest
+    }
+
+    suspend fun promotePlaybackCachedTrack(
+        trackId: String,
+        mediaCache: SimpleCache,
+        cacheKey: String,
+    ): OfflineTrackManifest? = withContext(Dispatchers.IO) {
+        val contentLength = runCatching {
+            ContentMetadata.getContentLength(mediaCache.getContentMetadata(cacheKey))
+        }.getOrNull() ?: return@withContext null
+        if (
+            contentLength <= 0L ||
+            !runCatching { mediaCache.isCached(cacheKey, 0L, contentLength) }.getOrDefault(false)
+        ) {
+            return@withContext null
+        }
+
+        tracksDirectory.mkdirs()
+        val temporary = File.createTempFile(
+            "${trackId.safeFileName()}-playback-cache-",
+            ".tmp",
+            tracksDirectory,
+        )
+        val digest = MessageDigest.getInstance("SHA-256")
+        val cacheDataSource = CacheDataSource.Factory()
+            .setCache(mediaCache)
+            .setCacheWriteDataSinkFactory(null)
+            .createDataSourceForRemovingDownload()
+        var copiedBytes = 0L
+        var copiedCompletely = false
+        try {
+            cacheDataSource.open(
+                DataSpec.Builder()
+                    .setUri(Uri.EMPTY)
+                    .setKey(cacheKey)
+                    .setLength(contentLength)
+                    .build(),
+            )
+            temporary.outputStream().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (copiedBytes < contentLength) {
+                    currentCoroutineContext().ensureActive()
+                    val read = cacheDataSource.read(
+                        buffer,
+                        0,
+                        minOf(buffer.size.toLong(), contentLength - copiedBytes).toInt(),
+                    )
+                    if (read <= 0) {
+                        break
+                    }
+                    digest.update(buffer, 0, read)
+                    output.write(buffer, 0, read)
+                    copiedBytes += read
+                }
+            }
+            copiedCompletely = copiedBytes == contentLength
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            copiedCompletely = false
+        } finally {
+            runCatching { cacheDataSource.close() }
+            if (!copiedCompletely) {
+                temporary.delete()
+            }
+        }
+        if (!copiedCompletely) {
+            return@withContext null
+        }
+
+        val destination = File(tracksDirectory, "${trackId.safeFileName()}.bin")
+        try {
+            currentCoroutineContext().ensureActive()
+            if (destination.exists()) {
+                destination.delete()
+            }
+            if (!temporary.renameTo(destination)) {
+                temporary.copyTo(destination, overwrite = true)
+                temporary.delete()
+            }
+        } catch (error: CancellationException) {
+            temporary.delete()
+            throw error
+        } catch (_: Throwable) {
+            temporary.delete()
+            return@withContext null
+        }
+        val manifest = OfflineTrackManifest(
+            trackId = trackId,
+            etag = null,
+            checksumSha256 = digest.digest().joinToString(separator = "") { "%02x".format(it) },
             localPath = destination.absolutePath,
         )
         save(manifest)

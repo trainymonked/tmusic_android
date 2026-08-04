@@ -22,6 +22,11 @@ enum class ArtistSortOption(
     LatestReleases("latestReleaseAt", "desc"),
 }
 
+enum class AccountRole {
+    USER,
+    ADMIN,
+}
+
 data class Account(
     val id: String,
     val displayName: String,
@@ -29,6 +34,7 @@ data class Account(
     val avatarUrl: String? = null,
     val lastFmConnection: LastFmConnection? = null,
     val canPlayMedia: Boolean = true,
+    val role: AccountRole = AccountRole.USER,
 )
 
 data class Track(

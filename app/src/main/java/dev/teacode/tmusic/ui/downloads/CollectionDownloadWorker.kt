@@ -165,23 +165,39 @@ internal suspend fun downloadTracksSequentially(
             )
         }
         onQueued(track)
-        try {
-            downloadTrackAssets(track)
-            currentCoroutineContext().ensureActive()
-            onDownloaded(track)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            if (isFatalFailure(error)) {
-                failedIds += track.id
-                onFailed(track)
+        var attempt = 0
+        while (attempt < COLLECTION_TRACK_DOWNLOAD_ATTEMPTS) {
+            if (!currentCoroutineContext().isActive) {
+                throw CancellationException()
+            }
+            if (!canContinue()) {
                 return TrackDownloadBatchResult(
                     failedTrackIds = failedIds,
                     interruptedByPolicy = true,
                 )
             }
-            failedIds += track.id
-            onFailed(track)
+            attempt += 1
+            try {
+                downloadTrackAssets(track)
+                currentCoroutineContext().ensureActive()
+                onDownloaded(track)
+                break
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (isFatalFailure(error)) {
+                    failedIds += track.id
+                    onFailed(track)
+                    return TrackDownloadBatchResult(
+                        failedTrackIds = failedIds,
+                        interruptedByPolicy = true,
+                    )
+                }
+                if (attempt >= COLLECTION_TRACK_DOWNLOAD_ATTEMPTS) {
+                    failedIds += track.id
+                    onFailed(track)
+                }
+            }
         }
     }
     return TrackDownloadBatchResult(
@@ -189,6 +205,8 @@ internal suspend fun downloadTracksSequentially(
         interruptedByPolicy = false,
     )
 }
+
+private const val COLLECTION_TRACK_DOWNLOAD_ATTEMPTS = 2
 
 private fun Collection<Track>.orderedAlbumTracks(): List<Track> {
     return sortedWith(

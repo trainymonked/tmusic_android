@@ -1,6 +1,8 @@
 package dev.teacode.tmusic.data
 
+import androidx.media3.datasource.cache.SimpleCache
 import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.AccountRole
 import dev.teacode.tmusic.domain.AuthRepository
 import dev.teacode.tmusic.domain.ArtistSortOption
 import dev.teacode.tmusic.domain.DownloadState
@@ -55,6 +57,16 @@ class RemoteAuthRepository(
 
     suspend fun appUpdateConfig(): AppUpdateInfo? {
         return apiClient.appUpdateConfig()
+    }
+
+    suspend fun createWebLoginCode(): WebLoginCode {
+        if (sessionStore.account()?.role != AccountRole.ADMIN) {
+            throw TMusicApiException(
+                statusCode = HttpURLConnection.HTTP_FORBIDDEN,
+                message = "Only administrators can create web player sign-in codes.",
+            )
+        }
+        return apiClient.createWebLoginCode()
     }
 
     override suspend fun signInWithGoogle(idToken: String): Result<Account> {
@@ -341,6 +353,14 @@ class RemoteMusicRepository(
 
     override suspend fun promoteCachedTrack(trackId: String): OfflineTrackManifest? {
         return offlineTrackStore.promoteCachedTrack(trackId)
+    }
+
+    suspend fun promotePlaybackCachedTrack(
+        trackId: String,
+        mediaCache: SimpleCache,
+        cacheKey: String,
+    ): OfflineTrackManifest? {
+        return offlineTrackStore.promotePlaybackCachedTrack(trackId, mediaCache, cacheKey)
     }
 
     suspend fun clearDownloads() {

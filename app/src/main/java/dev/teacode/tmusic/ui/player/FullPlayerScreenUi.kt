@@ -74,6 +74,7 @@ fun FullPlayerScreen(
     canSkip: Boolean,
     shuffleEnabled: Boolean,
     repeatMode: PlaybackRepeatMode,
+    animatedPlayerBackground: Boolean,
     showLyrics: Boolean,
     lyrics: TrackLyrics?,
     lyricsUnavailable: Boolean,
@@ -158,8 +159,12 @@ fun FullPlayerScreen(
             displayedArtworkBitmap = artworkBitmap
         }
     }
-    val controlsContrastScrimAlpha = remember(displayedArtworkBitmap) {
-        displayedArtworkBitmap?.controlsContrastScrimAlpha() ?: 0f
+    val controlsContrastScrimAlpha = remember(displayedArtworkBitmap, animatedPlayerBackground) {
+        if (animatedPlayerBackground) {
+            0f
+        } else {
+            displayedArtworkBitmap?.controlsContrastScrimAlpha() ?: 0f
+        }
     }
     val durationSeconds = currentDurationSeconds
     val progressSeconds = currentProgressSeconds
@@ -370,25 +375,34 @@ fun FullPlayerScreen(
                 onClick = {},
             ),
     ) {
-        displayedArtworkBitmap?.let { bitmap ->
-            Image(
-                bitmap = bitmap,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        alpha = 0.75f
-                        scaleX = 1.12f
-                        scaleY = 1.12f
-                    }
-                    .blur(32.dp),
+        if (animatedPlayerBackground) {
+            AnimatedArtworkBackground(
+                artworkBitmap = displayedArtworkBitmap,
+                accentColor = track.accentColor,
+                isPlaying = playerState.isPlaying,
+                modifier = Modifier.fillMaxSize(),
             )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.5f)),
-            )
+        } else {
+            displayedArtworkBitmap?.let { bitmap ->
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = 0.75f
+                            scaleX = 1.12f
+                            scaleY = 1.12f
+                        }
+                        .blur(32.dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.5f)),
+                )
+            }
         }
         if (controlsContrastScrimAlpha > 0f) {
             Box(
@@ -634,9 +648,5 @@ private fun FullPlayerSourceHeader(
 }
 
 internal fun Track.playbackArtistNames(): String {
-    val names = (artists.map { it.name } + artist.split(';'))
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .distinctBy { it.lowercase() }
-    return names.joinToString(" \u2022 ").ifBlank { artist }
+    return displayArtistNames()
 }

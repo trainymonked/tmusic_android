@@ -1,17 +1,19 @@
 package dev.teacode.tmusic.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
@@ -30,11 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.teacode.tmusic.domain.TrackLyrics
 
-private const val SYNCED_LYRICS_TRANSITION_DURATION_MS = 220
+private const val SYNCED_LYRICS_TRANSITION_DURATION_MS = 260
+private val syncedLyricsEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
 internal data class SyncedLyricLine(
     val timeMs: Long,
@@ -63,6 +67,7 @@ fun LyricsBlock(
     val showOnlyActiveSyncedLyrics = LocalShowOnlyActiveSyncedLyrics.current
     val centerSyncedLyrics = LocalCenterSyncedLyrics.current
     val currentPlaybackPositionMs = LocalPlaybackPositionMs.current
+    val lyricEnterOffsetPx = with(LocalDensity.current) { 6.dp.roundToPx() }
     var activeLyricIndex by remember(syncedLines) {
         mutableIntStateOf(
             syncedLines.activeLyricIndexAt(
@@ -131,25 +136,36 @@ fun LyricsBlock(
             }
             previewLines.isNotEmpty() -> {
                 AnimatedContent(
-                    targetState = activeLyricIndex to previewLines,
+                    targetState = Triple(trackId, activeLyricIndex, previewLines),
                     transitionSpec = {
-                        slideInVertically(
-                            animationSpec = tween(durationMillis = SYNCED_LYRICS_TRANSITION_DURATION_MS),
-                            initialOffsetY = { height -> height },
-                        ) togetherWith slideOutVertically(
-                            animationSpec = tween(durationMillis = SYNCED_LYRICS_TRANSITION_DURATION_MS),
-                            targetOffsetY = { height -> -height },
-                        )
+                        (
+                            fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = SYNCED_LYRICS_TRANSITION_DURATION_MS,
+                                    easing = syncedLyricsEaseOut,
+                                ),
+                            ) + slideInVertically(
+                                animationSpec = tween(
+                                    durationMillis = SYNCED_LYRICS_TRANSITION_DURATION_MS,
+                                    easing = syncedLyricsEaseOut,
+                                ),
+                                initialOffsetY = { lyricEnterOffsetPx },
+                            )
+                        ) togetherWith ExitTransition.None
                     },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(92.dp)
+                        .clickable { showFullLyrics = true },
+                    contentAlignment = if (centerSyncedLyrics) Alignment.Center else Alignment.CenterStart,
                     label = "Synced lyrics preview",
-                ) { (_, visibleLines) ->
+                ) { (_, _, visibleLines) ->
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = if (showOnlyActiveSyncedLyrics) 88.dp else 92.dp)
-                            .padding(top = if (showOnlyActiveSyncedLyrics) 8.dp else 0.dp)
-                            .clickable { showFullLyrics = true },
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(
+                            space = 4.dp,
+                            alignment = Alignment.CenterVertically,
+                        ),
                         horizontalAlignment = if (centerSyncedLyrics) {
                             Alignment.CenterHorizontally
                         } else {
@@ -264,15 +280,18 @@ private fun List<SyncedLyricLine>.twoVisibleLyricLines(currentIndex: Int): List<
     if (isEmpty()) {
         return emptyList()
     }
-    if (currentIndex >= lastIndex) {
-        return listOf(getOrNull(currentIndex)?.text.orEmpty().ifBlank { "\u2022\u2022\u2022" })
+    if (currentIndex < 0) {
+        return listOf("")
     }
-    val currentText = if (currentIndex < 0) "\u2022\u2022\u2022" else getOrNull(currentIndex)?.text.orEmpty()
+    val currentText = getOrNull(currentIndex)?.text.orEmpty()
+    if (currentText.isBlank()) {
+        return listOf("")
+    }
+    if (currentIndex >= lastIndex) {
+        return listOf(currentText)
+    }
     val nextText = getOrNull(currentIndex + 1)?.text.orEmpty()
-    return listOf(
-        currentText.ifBlank { "\u2022\u2022\u2022" },
-        nextText.ifBlank { "\u2022\u2022\u2022" },
-    )
+    return listOf(currentText, nextText)
 }
 
 private fun List<SyncedLyricLine>.activeLyricIndexAt(progressMs: Long): Int {
@@ -298,8 +317,13 @@ private fun String.parseSyncedLyrics(): List<SyncedLyricLine> {
             }
             SyncedLyricLine(
                 timeMs = minutes * 60_000L + seconds * 1000L + fractionMs,
-                text = match.groupValues[4].trim(),
+                text = match.groupValues[4].toVisibleLyricText(),
             )
         }
         .toList()
+}
+
+private fun String.toVisibleLyricText(): String {
+    val text = trim()
+    return text.takeUnless { it == "..." || it == "\u2026" }.orEmpty()
 }

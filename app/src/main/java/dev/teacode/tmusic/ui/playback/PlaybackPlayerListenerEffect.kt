@@ -85,6 +85,16 @@ internal fun PlaybackPlayerListenerEffect(
                 if (!isCurrentPlayer(observedPlayer) || isCrossfadeActive()) {
                     return
                 }
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+                    val currentTrack = playerState().currentTrack ?: return
+                    val previousEvent = activePlayEvent()
+                    onCompleteActivePlayEvent()
+                    onEnsureActivePlayEvent(
+                        currentTrack,
+                        previousEvent?.trackId == currentTrack.id,
+                    )
+                    return
+                }
                 val mediaId = mediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
                 val request = gaplessPlaybackRequest()
                 val requestIndex = request?.mediaIds?.indexOf(mediaId)?.takeIf { it >= 0 }

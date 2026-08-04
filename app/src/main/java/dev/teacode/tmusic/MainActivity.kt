@@ -1,5 +1,8 @@
 package dev.teacode.tmusic
 
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -34,8 +37,11 @@ import dev.teacode.tmusic.ui.theme.LocalAppThemeController
 import dev.teacode.tmusic.ui.theme.TMusicTheme
 
 class MainActivity : ComponentActivity() {
+    private var openFullPlayerRequestSerial by mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleLaunchIntent(intent)
 
         val sessionStore = SessionStore(applicationContext)
         val userPreferencesStore = UserPreferencesStore(applicationContext)
@@ -105,9 +111,41 @@ class MainActivity : ComponentActivity() {
                         pendingLibraryMutationStore = pendingLibraryMutationStore,
                         pendingPlayEventStore = pendingPlayEventStore,
                         lastFmAuthTokenStore = lastFmAuthTokenStore,
+                        openFullPlayerRequestSerial = openFullPlayerRequestSerial,
                     )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent?.action != ACTION_OPEN_FULL_PLAYER) {
+            return
+        }
+        intent.action = null
+        openFullPlayerRequestSerial += 1
+    }
+
+    companion object {
+        const val ACTION_OPEN_FULL_PLAYER = "dev.teacode.tmusic.action.OPEN_FULL_PLAYER"
+        private const val REQUEST_OPEN_FULL_PLAYER = 2001
+
+        fun openFullPlayerPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, MainActivity::class.java)
+                .setAction(ACTION_OPEN_FULL_PLAYER)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            return PendingIntent.getActivity(
+                context,
+                REQUEST_OPEN_FULL_PLAYER,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
         }
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalContext
+import dev.teacode.tmusic.MainActivity
 import dev.teacode.tmusic.R
 import dev.teacode.tmusic.domain.PlayerState
 import dev.teacode.tmusic.playback.PlaybackForegroundService
@@ -42,6 +43,7 @@ internal fun PlaybackSystemIntegration(
     val toggleFavoriteAction = rememberUpdatedState(onToggleFavorite)
     val mediaSession = remember {
         MediaSession(context, "TMusicPlaybackSession").apply {
+            setSessionActivity(MainActivity.openFullPlayerPendingIntent(context))
             setCallback(
                 object : MediaSession.Callback() {
                     override fun onPlay() = playAction.value.invoke()

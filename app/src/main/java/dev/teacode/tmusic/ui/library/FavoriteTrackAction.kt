@@ -33,13 +33,14 @@ internal fun toggleFavoriteTrackAction(
     refreshStorageStats: () -> Unit,
     getFavoriteSyncTrackIds: () -> Set<String>,
     setFavoriteSyncTrackIds: (Set<String>) -> Unit,
+    getPendingFavoriteStates: () -> Map<String, Boolean>,
     loadArtwork: (String, ArtworkImageSize) -> Unit,
     enqueueLibraryMutation: (String, JSONObject) -> Unit,
     saveLibraryCache: () -> Unit,
     markServerUnavailable: (Throwable) -> Unit,
     setLibraryError: (String?) -> Unit,
 ) {
-    if (!canUseServerRequests()) {
+    if (!canUseServerRequests() || track.id in getPendingFavoriteStates()) {
         val favoritePlaylist = getPlaylists().favoritePlaylistForLocalMutation()
         val wasFavorite = currentFavoriteState(
             track = track,
@@ -181,14 +182,11 @@ private fun currentFavoriteState(
 ): Boolean {
     val favoritePlaylist = playlists.firstOrNull { it.isFavoritesPlaylist() }
     val knownTrackState = tracks.firstOrNull { it.id == track.id }?.isLiked
-    if (knownTrackState == false || track.isLiked == false) {
-        return false
+    if (knownTrackState != null) {
+        return knownTrackState
     }
     if (favoritePlaylist != null && track.id in favoritePlaylist.trackIds) {
         return true
-    }
-    if (knownTrackState != null) {
-        return knownTrackState
     }
     return track.isLiked == true
 }

@@ -2,6 +2,7 @@ package dev.teacode.tmusic.data
 
 import android.content.Context
 import dev.teacode.tmusic.domain.Account
+import dev.teacode.tmusic.domain.AccountRole
 
 data class SessionTokens(
     val accessToken: String,
@@ -40,6 +41,9 @@ class SessionStore(context: Context) {
         val email = preferences.getString(KEY_EMAIL, null).orEmpty()
         val avatarUrl = preferences.getString(KEY_AVATAR_URL, null)?.takeIf { it.isNotBlank() }
         val canPlayMedia = preferences.getBoolean(KEY_CAN_PLAY_MEDIA, true)
+        val role = preferences.getString(KEY_USER_ROLE, null)
+            ?.let { storedRole -> runCatching { AccountRole.valueOf(storedRole) }.getOrNull() }
+            ?: AccountRole.USER
 
         return if (id.isNullOrBlank() || displayName.isNullOrBlank()) {
             null
@@ -50,6 +54,7 @@ class SessionStore(context: Context) {
                 email = email,
                 avatarUrl = avatarUrl,
                 canPlayMedia = canPlayMedia,
+                role = role,
             )
         }
     }
@@ -63,6 +68,7 @@ class SessionStore(context: Context) {
             .putString(KEY_EMAIL, session.user.email)
             .putString(KEY_AVATAR_URL, session.user.avatarUrl)
             .putBoolean(KEY_CAN_PLAY_MEDIA, session.user.canPlayMedia)
+            .putString(KEY_USER_ROLE, session.user.role.name)
             .apply()
     }
 
@@ -80,6 +86,7 @@ class SessionStore(context: Context) {
             .putString(KEY_EMAIL, account.email)
             .putString(KEY_AVATAR_URL, account.avatarUrl)
             .putBoolean(KEY_CAN_PLAY_MEDIA, account.canPlayMedia)
+            .putString(KEY_USER_ROLE, account.role.name)
             .apply()
     }
 
@@ -96,5 +103,6 @@ class SessionStore(context: Context) {
         const val KEY_EMAIL = "email"
         const val KEY_AVATAR_URL = "avatar_url"
         const val KEY_CAN_PLAY_MEDIA = "can_play_media"
+        const val KEY_USER_ROLE = "user_role"
     }
 }

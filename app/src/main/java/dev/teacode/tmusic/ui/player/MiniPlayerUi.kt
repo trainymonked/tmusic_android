@@ -69,6 +69,7 @@ private enum class MiniPlayerDragAxis {
 fun MiniPlayer(
     playerState: PlayerState,
     artworkBitmap: ImageBitmap?,
+    animatedPlayerBackground: Boolean,
     queueGeneration: Long,
     canSkip: Boolean,
     previousTrack: Track?,
@@ -270,26 +271,35 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .height(68.dp),
         ) {
-            displayedArtworkBitmap?.let { bitmap ->
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
+            if (animatedPlayerBackground) {
+                AnimatedArtworkBackground(
+                    artworkBitmap = displayedArtworkBitmap,
+                    accentColor = track.accentColor,
+                    isPlaying = playerState.isPlaying,
+                    modifier = Modifier.matchParentSize(),
+                )
+            } else {
+                displayedArtworkBitmap?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .graphicsLayer {
+                                alpha = 0.42f
+                                scaleX = 1.08f
+                                scaleY = 1.08f
+                            }
+                            .blur(24.dp),
+                    )
+                }
+                Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .graphicsLayer {
-                            alpha = 0.42f
-                            scaleX = 1.08f
-                            scaleY = 1.08f
-                        }
-                        .blur(24.dp),
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.78f)),
                 )
             }
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.78f)),
-            )
             Column(modifier = Modifier.matchParentSize()) {
                 PlaybackScrubber(
                     progressSeconds = playerState.progressSeconds,

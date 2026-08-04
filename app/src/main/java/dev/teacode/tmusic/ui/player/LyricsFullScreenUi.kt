@@ -115,7 +115,7 @@ private fun ColumnScope.SyncedLyricsList(
         itemsIndexed(lines, key = { index, line -> "${line.timeMs}:$index" }) { index, line ->
             val active = index == activeIndex
             Text(
-                text = line.text.ifBlank { "\u2022\u2022\u2022" },
+                text = line.text,
                 style = if (active) {
                     MaterialTheme.typography.titleLarge.copy(
                         fontSize = 20.sp,

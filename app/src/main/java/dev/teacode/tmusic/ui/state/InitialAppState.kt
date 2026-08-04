@@ -35,6 +35,7 @@ internal fun loadInitialAppState(
     val offlineOnly = userPreferencesStore.offlineOnly()
     val cachedLibrary = libraryCacheStore.library()
     val tracks = musicRepository.withOfflineState(cachedLibrary.tracks)
+        .withFavoritePlaylistState(cachedLibrary.playlists)
         .withPendingFavoriteStates(pendingLibraryMutationStore.pendingFavoriteStates())
     val savedPlayback = playbackStateStore.state()
     val activePlayEvent = savedPlayback?.let { playback ->

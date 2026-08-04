@@ -23,14 +23,26 @@ fun albumListSubtitle(album: LibraryAlbum): String {
 }
 
 fun LibraryAlbum.displayArtistNames(): String {
-    val names = (artists.map { it.name } + artist.artistNameParts())
-        .distinctBy { it.lowercase() }
+    val names = resolvedArtistDisplayNames(artists, artist)
     return names.joinToString(" \u2022 ").ifBlank { artist.replace(';', '\u2022') }
 }
 
 fun LibraryAlbum.hasNavigableDisplayArtist(): Boolean {
-    return (artists.map { it.name } + artist.artistNameParts())
+    return resolvedArtistDisplayNames(artists, artist)
         .any { !it.isVariousArtistsName() }
+}
+
+internal fun resolvedArtistDisplayNames(
+    artists: List<LibraryArtist>,
+    fallbackArtist: String,
+): List<String> {
+    val structuredNames = artists
+        .flatMap { it.name.artistNameParts() }
+        .distinctBy { it.lowercase() }
+    return structuredNames.ifEmpty {
+        fallbackArtist.artistNameParts()
+            .distinctBy { it.lowercase() }
+    }
 }
 
 fun trackCountLabel(count: Int): String {

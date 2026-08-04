@@ -35,6 +35,7 @@ import dev.teacode.tmusic.domain.RecentLibraryItem
 import dev.teacode.tmusic.domain.ScrobbleState
 import dev.teacode.tmusic.domain.Track
 import dev.teacode.tmusic.domain.TrackLyrics
+import dev.teacode.tmusic.data.WebLoginCode
 import kotlinx.coroutines.launch
 
 @Composable
@@ -115,6 +116,7 @@ internal fun MainShell(
     scrobblingPaused: Boolean,
     showOnlyActiveSyncedLyrics: Boolean,
     centerSyncedLyrics: Boolean,
+    animatedPlayerBackground: Boolean,
     crossfadeSeconds: Int,
     equalizerAvailable: Boolean,
     offlineOnly: Boolean,
@@ -140,6 +142,7 @@ internal fun MainShell(
     onScrobblingPausedChange: (Boolean) -> Unit,
     onShowOnlyActiveSyncedLyricsChange: (Boolean) -> Unit,
     onCenterSyncedLyricsChange: (Boolean) -> Unit,
+    onAnimatedPlayerBackgroundChange: (Boolean) -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit,
     onDownloadUsingCellularChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
@@ -159,6 +162,7 @@ internal fun MainShell(
     onCompleteLastFmSession: () -> Unit,
     onDisconnectLastFm: () -> Unit,
     onSyncLastFmUpdates: () -> Unit,
+    onCreateWebLoginCode: suspend () -> WebLoginCode,
     onClearDownloads: () -> Unit,
     onClearCache: () -> Unit,
     onCheckUpdates: () -> Unit,
@@ -264,6 +268,7 @@ internal fun MainShell(
             listOfNotNull(playerState.currentTrack)
         )
         .mapNotNull { track -> track.isLiked?.let { isLiked -> track.id to isLiked } }
+        .distinctBy { (trackId, _) -> trackId }
     val knownLikedTrackIds = knownTrackLikeStates
         .filter { (_, isLiked) -> isLiked }
         .map { (trackId, _) -> trackId }
@@ -525,6 +530,7 @@ internal fun MainShell(
                 selectedTab = destination.tab,
                 playerState = playerState,
                 artworkBitmap = artworkBitmap,
+                animatedPlayerBackground = animatedPlayerBackground,
                 queueGeneration = playbackQueueGeneration,
                 canSkipTracks = canSkipTracks,
                 previousTrack = miniPreviousTrack,
@@ -896,6 +902,7 @@ internal fun MainShell(
                     scrobblingPaused = scrobblingPaused,
                     showOnlyActiveSyncedLyrics = showOnlyActiveSyncedLyrics,
                     centerSyncedLyrics = centerSyncedLyrics,
+                    animatedPlayerBackground = animatedPlayerBackground,
                     crossfadeSeconds = crossfadeSeconds,
                     equalizerAvailable = equalizerAvailable,
                     offlineOnly = offlineOnly,
@@ -910,6 +917,7 @@ internal fun MainShell(
                     onScrobblingPausedChange = onScrobblingPausedChange,
                     onShowOnlyActiveSyncedLyricsChange = onShowOnlyActiveSyncedLyricsChange,
                     onCenterSyncedLyricsChange = onCenterSyncedLyricsChange,
+                    onAnimatedPlayerBackgroundChange = onAnimatedPlayerBackgroundChange,
                     onCrossfadeSecondsChange = onCrossfadeSecondsChange,
                     onDownloadUsingCellularChange = onDownloadUsingCellularChange,
                     onOpenEqualizer = onOpenEqualizer,
@@ -917,6 +925,7 @@ internal fun MainShell(
                     onCompleteLastFmSession = onCompleteLastFmSession,
                     onDisconnectLastFm = onDisconnectLastFm,
                     onSyncLastFmUpdates = onSyncLastFmUpdates,
+                    onCreateWebLoginCode = onCreateWebLoginCode,
                     onClearDownloads = onClearDownloads,
                     onClearCache = onClearCache,
                     onCheckUpdates = onCheckUpdates,
@@ -952,6 +961,7 @@ internal fun MainShell(
                 canSkipTracks = canSkipTracks,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,
+                animatedPlayerBackground = animatedPlayerBackground,
                 showLyrics = true,
                 currentLyrics = currentLyrics,
                 currentLyricsUnavailable = currentLyricsUnavailable,

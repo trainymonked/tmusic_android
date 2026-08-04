@@ -370,6 +370,12 @@ private fun shouldLoadFullFavoritesPayload(
     if (serverFavorites == null) {
         return cachedFavorites.trackIds.size > cachedFavorites.playlistTrackIdsByTrackId.size
     }
+    if (
+        serverFavorites.updatedAt != null &&
+        serverFavorites.updatedAt != cachedFavorites.updatedAt
+    ) {
+        return true
+    }
     if (serverFavorites.trackCount <= 0) {
         return cachedFavorites.trackIds.size > cachedFavorites.playlistTrackIdsByTrackId.size
     }

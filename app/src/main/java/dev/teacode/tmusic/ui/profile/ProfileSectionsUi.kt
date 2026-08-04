@@ -30,7 +30,9 @@ internal fun ProfileUpdateSection(
 @Composable
 internal fun ProfileAppearanceSection(
     themeMode: AppThemeMode,
+    animatedPlayerBackground: Boolean,
     onThemeModeChange: (AppThemeMode) -> Unit,
+    onAnimatedPlayerBackgroundChange: (Boolean) -> Unit,
 ) {
     ProfileSettingsSection(title = "Appearance") {
         ProfileThemeModeRow(
@@ -38,6 +40,13 @@ internal fun ProfileAppearanceSection(
             subtitle = "",
             selectedMode = themeMode,
             onModeSelected = onThemeModeChange,
+        )
+        ProfileSettingDivider()
+        ProfileSwitchRow(
+            title = "Animated player background",
+            subtitle = "Colors from album artwork",
+            checked = animatedPlayerBackground,
+            onCheckedChange = onAnimatedPlayerBackgroundChange,
         )
     }
 }

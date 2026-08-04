@@ -29,6 +29,7 @@ internal class LibraryPayloadActionHost(
             .toList()
         val nextTracks = musicRepository.withOfflineState(mergedTracks)
             .withKnownTrackMetadata(currentTracks)
+            .withFavoritePlaylistState(getPlaylists())
             .withPendingFavoriteStates(getPendingFavoriteStates())
         setTracks(nextTracks)
         libraryCacheStore.saveLibrary(
@@ -44,7 +45,9 @@ internal class LibraryPayloadActionHost(
             cachedTracks = getTracks(),
             withOfflineState = musicRepository::withOfflineState,
         )
-        val nextTracks = merged.tracks.withPendingFavoriteStates(getPendingFavoriteStates())
+        val nextTracks = merged.tracks
+            .withFavoritePlaylistState(merged.playlists)
+            .withPendingFavoriteStates(getPendingFavoriteStates())
         setTracks(nextTracks)
         setPlaylists(merged.playlists)
         libraryCacheStore.saveLibrary(
@@ -83,7 +86,6 @@ internal class LibraryPayloadActionHost(
                 .values
                 .toList(),
         ).withKnownTrackMetadata(currentTracks)
-            .withPendingFavoriteStates(getPendingFavoriteStates())
         val nextPlaylists = getPlaylists()
             .sanitizeClientPlaylists()
             .map { existingPlaylist ->
@@ -100,11 +102,14 @@ internal class LibraryPayloadActionHost(
                     listOf(nextPlaylist) + updatedPlaylists
                 }
             }
-        setTracks(mergedTracks)
+        val nextTracks = mergedTracks
+            .withFavoritePlaylistState(nextPlaylists)
+            .withPendingFavoriteStates(getPendingFavoriteStates())
+        setTracks(nextTracks)
         setPlaylists(nextPlaylists)
         libraryCacheStore.saveLibrary(
             playlists = nextPlaylists,
-            tracks = mergedTracks,
+            tracks = nextTracks,
             savedAlbums = getSavedAlbums(),
         )
         return nextPlaylist

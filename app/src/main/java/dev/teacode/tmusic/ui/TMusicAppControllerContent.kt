@@ -68,13 +68,18 @@ internal fun TMusicAppControllerContent(
     pendingLibraryMutationStore: PendingLibraryMutationStore,
     pendingPlayEventStore: PendingPlayEventStore,
     lastFmAuthTokenStore: LastFmAuthTokenStore,
+    openFullPlayerRequestSerial: Int,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val playbackSnapshotSaveMutex = remember { Mutex() }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) {}
+    var handledOpenFullPlayerRequestSerial by remember { mutableStateOf(0) }
+    var bluetoothPermissionRevision by remember { mutableStateOf(0) }
+    val startupPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        bluetoothPermissionRevision += 1
+    }
     val mediaCache = remember {
         SimpleCache(
             File(context.cacheDir, MEDIA3_PLAYBACK_CACHE_DIR),
@@ -99,14 +104,28 @@ internal fun TMusicAppControllerContent(
     }
 
     LaunchedEffect(Unit) {
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val missingPermissions = buildList {
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+        if (missingPermissions.isNotEmpty()) {
+            startupPermissionLauncher.launch(missingPermissions.toTypedArray())
         }
     }
     val initialState = remember {
@@ -1042,6 +1061,17 @@ internal fun TMusicAppControllerContent(
         selectTrack = ::selectTrack,
     )
 
+    LaunchedEffect(openFullPlayerRequestSerial, playerState.currentTrack?.id) {
+        if (openFullPlayerRequestSerial <= handledOpenFullPlayerRequestSerial) {
+            return@LaunchedEffect
+        }
+        if (playerState.currentTrack == null) {
+            return@LaunchedEffect
+        }
+        handledOpenFullPlayerRequestSerial = openFullPlayerRequestSerial
+        navigationController.openFullPlayerFromMiniPlayer()
+    }
+
     val albumPlaybackActionHost = createAlbumPlaybackController(
         appState = appState,
         scope = scope,
@@ -1208,6 +1238,11 @@ internal fun TMusicAppControllerContent(
         userPreferencesStore.setCenterSyncedLyrics(enabled)
     }
 
+    fun setAnimatedPlayerBackground(enabled: Boolean) {
+        animatedPlayerBackground = enabled
+        userPreferencesStore.setAnimatedPlayerBackground(enabled)
+    }
+
     fun togglePlayback() {
         playbackRuntimeActionHost.togglePlayback()
     }
@@ -1251,8 +1286,19 @@ internal fun TMusicAppControllerContent(
     }
 
     suspend fun ensureTrackDownloaded(track: Track) {
+        if (musicRepository.localPlaybackUrl(track.id) != null) {
+            return
+        }
         val promotedManifest = musicRepository.promoteCachedTrack(track.id)
         if (promotedManifest != null) {
+            return
+        }
+        val promotedPlaybackManifest = musicRepository.promotePlaybackCachedTrack(
+            trackId = track.id,
+            mediaCache = mediaCache,
+            cacheKey = playbackMediaCacheKey(track.id),
+        )
+        if (promotedPlaybackManifest != null) {
             return
         }
         if (!canUseMediaServerRequests()) {
@@ -1280,6 +1326,7 @@ internal fun TMusicAppControllerContent(
         ensureTrackDownloaded = ::ensureTrackDownloaded,
         cacheDownloadedAssets = ::cacheDownloadedAssets,
         refreshStorageStats = ::refreshStorageStats,
+        getPendingFavoriteStates = pendingLibraryMutationStore::pendingFavoriteStates,
         loadArtwork = ::loadArtwork,
         enqueueLibraryMutation = ::enqueueLibraryMutation,
         saveLibraryCache = ::saveLibraryCache,
@@ -1750,6 +1797,7 @@ internal fun TMusicAppControllerContent(
         LocalPlaybackPositionMs provides currentPlaybackPositionMs,
         LocalShowOnlyActiveSyncedLyrics provides showOnlyActiveSyncedLyrics,
         LocalCenterSyncedLyrics provides centerSyncedLyrics,
+        LocalBluetoothPermissionRevision provides bluetoothPermissionRevision,
     ) {
         TMusicAppRuntimeRenderBinding(
         appState = appState,
@@ -1775,6 +1823,7 @@ internal fun TMusicAppControllerContent(
         onScrobblingPausedChange = ::setScrobblingPaused,
         onShowOnlyActiveSyncedLyricsChange = ::setShowOnlyActiveSyncedLyrics,
         onCenterSyncedLyricsChange = ::setCenterSyncedLyrics,
+        onAnimatedPlayerBackgroundChange = ::setAnimatedPlayerBackground,
         onCrossfadeSecondsChange = ::setCrossfadeSeconds,
         onDownloadUsingCellularChange = ::setDownloadUsingCellular,
         onOpenEqualizer = ::openSystemEqualizer,
@@ -1794,6 +1843,7 @@ internal fun TMusicAppControllerContent(
         onCompleteLastFmSession = ::completeLastFmSession,
         onDisconnectLastFm = ::disconnectLastFm,
         onSyncLastFmUpdates = ::syncPendingPlayEvents,
+        onCreateWebLoginCode = authRepository::createWebLoginCode,
         onClearDownloads = ::clearDownloads,
         onClearCache = ::clearAppCache,
         onCheckUpdates = appUpdateHost::checkUpdatesManually,
